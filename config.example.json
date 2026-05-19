@@ -1,0 +1,26 @@
+{
+  "defaultModel": "claude-sonnet-4-6",
+  "timeoutSeconds": 900,
+  "allowedOrigins": ["*"],
+  "enableLogging": true,
+  "pools": {
+    "claude": { "size": 4, "maxQueue": 8 },
+    "codex":  { "size": 2, "maxQueue": 4 },
+    "gemini": { "size": 4, "maxQueue": 8 }
+  },
+  "rateLimit": {
+    "defaultRpm": 60,
+    "perKey": {}
+  },
+  "idempotency": {
+    "ttlSeconds": 300,
+    "maxEntries": 1000
+  },
+  "imageCache": {
+    "ttlSeconds": 600,
+    "maxEntries": 200
+  },
+  "apiKeys": [
+    { "key": "REPLACE_WITH_RANDOM_HEX_64CHARS", "app": "remote", "rpm": 60 }
+  ]
+}

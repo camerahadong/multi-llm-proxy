@@ -1,0 +1,12 @@
+node_modules
+dist
+data
+.env
+*.log
+.DS_Store
+config.json
+coverage
+API_GUIDE.md
+config.json.bak.*
+*.bak
+*.bak.*
