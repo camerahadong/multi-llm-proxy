@@ -20,6 +20,7 @@ import { downloadRoute } from './routes/download.js';
 import { guideRoute } from './routes/guide.js';
 import { healthRoute } from './routes/health.js';
 import { imagesRoute } from './routes/images.js';
+import { messagesRoute } from './routes/messages.js';
 import { metricsRoute } from './routes/metrics.js';
 import { modelsRoute } from './routes/models.js';
 import { statsRoute } from './routes/stats.js';
@@ -70,7 +71,7 @@ export async function buildServer({ config }: BuildOptions): Promise<{ app: Fast
   await app.register(cors, {
     origin: runtime.get().allowedOrigins,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-App-Name', 'Idempotency-Key'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-App-Name', 'Idempotency-Key', 'x-api-key', 'anthropic-version', 'anthropic-beta'],
   });
   await app.register(sensible);
 
@@ -83,6 +84,7 @@ export async function buildServer({ config }: BuildOptions): Promise<{ app: Fast
   await metricsRoute(app, ctx);
   await downloadRoute(app);
   await chatRoute(app, ctx);
+  await messagesRoute(app, ctx);
   await visionRoute(app, ctx);
   await completionsRoute(app, ctx);
   await imagesRoute(app, ctx);

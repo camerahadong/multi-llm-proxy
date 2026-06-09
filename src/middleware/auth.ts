@@ -36,8 +36,10 @@ export function authenticate(req: FastifyRequest, runtime: RuntimeConfig): AuthO
   }
 
   const authHeader = (req.headers['authorization'] as string) ?? '';
-  const token = authHeader.replace('Bearer ', '').trim();
-  if (!token) return { ok: false, error: 'Missing Authorization header' };
+  const xApiKey = (req.headers['x-api-key'] as string) ?? '';
+  // Accept both OpenAI-style `Authorization: Bearer` and Anthropic-style `x-api-key`.
+  const token = authHeader.replace('Bearer ', '').trim() || xApiKey.trim();
+  if (!token) return { ok: false, error: 'Missing Authorization or x-api-key header' };
 
   for (const entry of cfg.apiKeys) {
     const norm = normalizeApiKey(entry);
