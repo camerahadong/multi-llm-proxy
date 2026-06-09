@@ -19,12 +19,14 @@ export function callCodexCli(input: CallInput, signal: AbortSignal): Promise<Cal
       ? fullPrompt.replace(/@\/tmp\/(?:claude-vision|gemini-work)\/[^\s]+/g, '').replace(/\n{3,}/g, '\n\n').trim()
       : fullPrompt;
 
+    // ChatGPT-account Codex rejects every `--model NAME` (gpt-5, gpt-5-codex, o3 …)
+    // with HTTP 400 "model is not supported when using Codex with a ChatGPT account".
+    // Omitting `-m` lets the CLI fall back to the account's default model, which works.
     const args = [
       'exec',
       '--ephemeral',
       '--skip-git-repo-check',
       '--dangerously-bypass-approvals-and-sandbox',
-      '--model', 'gpt-5',
       '--json',
       promptWithoutAtRefs,
       ...imagePaths.flatMap((p) => ['-i', p]),

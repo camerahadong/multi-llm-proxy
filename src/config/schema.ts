@@ -24,12 +24,10 @@ export const configSchema = z.object({
     .object({
       claude: poolConfigSchema.default({ size: 4, maxQueue: 8 }),
       codex: poolConfigSchema.default({ size: 2, maxQueue: 4 }),
-      gemini: poolConfigSchema.default({ size: 4, maxQueue: 8 }),
     })
     .default({
       claude: { size: 4, maxQueue: 8 },
       codex: { size: 2, maxQueue: 4 },
-      gemini: { size: 4, maxQueue: 8 },
     }),
 
   rateLimit: z

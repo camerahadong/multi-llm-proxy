@@ -3,14 +3,14 @@ import type { BackendName, PoolStats } from '../backends/types.js';
 import { authenticate } from '../middleware/auth.js';
 import type { AppContext } from '../types/index.js';
 
-const FALLBACK_ORDER: BackendName[] = ['claude', 'codex', 'gemini'];
+const FALLBACK_ORDER: BackendName[] = ['claude', 'codex'];
 
 function recommendedModel(ctx: AppContext): string {
   const claude = ctx.backends.get('claude').stats();
   const codex = ctx.backends.get('codex').stats();
   if (claude.status === 'limited' || claude.status === 'error') {
     if (codex.status !== 'error') return 'gpt-5';
-    return 'gemini-3-pro';
+    return 'claude-sonnet-4-6';
   }
   return 'auto';
 }
@@ -30,9 +30,7 @@ export async function healthRoute(app: FastifyInstance, ctx: AppContext): Promis
     let totalQueue = 0;
     let totalPoolSize = 0;
     for (const adapter of ctx.backends.all()) {
-      const label = adapter.name === 'claude' ? 'OAuth Max subscription' :
-                    adapter.name === 'codex'  ? 'ChatGPT Plus OAuth' :
-                                                'Google OAuth GCA';
+      const label = adapter.name === 'claude' ? 'OAuth Max subscription' : 'ChatGPT Plus OAuth';
       const stats = adapter.stats();
       backendsView[adapter.name] = { label, ...stats };
       totalInFlight += stats.inFlight;
@@ -42,7 +40,7 @@ export async function healthRoute(app: FastifyInstance, ctx: AppContext): Promis
 
     return {
       status: 'ok',
-      service: 'Claude + Codex + Gemini API Proxy',
+      service: 'Claude + Codex API Proxy',
       version: '2.0.0',
       guide: '/guide (markdown) | /guide?format=html (browser) | /guide?format=json (JSON)',
       backends: backendsView,

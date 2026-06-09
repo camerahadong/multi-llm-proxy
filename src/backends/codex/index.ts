@@ -26,7 +26,8 @@ export class CodexAdapter implements BackendAdapter {
   async healthCheck(): Promise<PoolStats> {
     try {
       const abort = new AbortController();
-      await this.call({ userPrompt: 'Reply only OK', model: 'gpt-5', timeoutMs: 60_000 }, abort.signal);
+      // Model name unused by cli.ts (no `-m` passed); kept here only for typing.
+      await this.call({ userPrompt: 'Reply only OK', model: 'codex-default', timeoutMs: 60_000 }, abort.signal);
     } catch (err) {
       this.pool.markStatus('error', (err as Error).message);
       logger.warn({ err: (err as Error).message }, 'codex health check failed');

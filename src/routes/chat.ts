@@ -59,7 +59,7 @@ export async function chatRoute(app: FastifyInstance, ctx: AppContext): Promise<
     const wantStream = !!body.stream;
     const hasTools = !!(tools && tools.length > 0);
 
-    let backendName: 'claude' | 'codex' | 'gemini' = 'claude';
+    let backendName: 'claude' | 'codex' = 'claude';
     let model = body.model ?? cfg.defaultModel;
     let routeReason = '';
     let enableThinking = !!body.thinking;
@@ -123,15 +123,9 @@ export async function chatRoute(app: FastifyInstance, ctx: AppContext): Promise<
         if (backendName !== 'claude') throw err;
         // Client cancelled mid-call: stop the fallback chain.
         if (controller.signal.aborted) throw err;
-        try {
-          result = await call('codex');
-          result.model = `codex:fallback-from-${model}`;
-        } catch (codexErr) {
-          if (controller.signal.aborted) throw codexErr;
-          logger.warn({ err: (codexErr as Error).message }, 'codex fallback failed → gemini');
-          result = await call('gemini');
-          result.model = `${result.model}:fallback-from-${model}`;
-        }
+        // Single fallback: Claude → Codex. Gemini backend was removed (CLI unstable).
+        result = await call('codex');
+        result.model = `codex:fallback-from-${model}`;
       }
 
       const elapsed = Date.now() - start;

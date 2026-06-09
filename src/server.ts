@@ -3,7 +3,6 @@ import sensible from '@fastify/sensible';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { ClaudeAdapter } from './backends/claude/index.js';
 import { CodexAdapter } from './backends/codex/index.js';
-import { GeminiAdapter } from './backends/gemini/index.js';
 import { BackendRegistry } from './backends/registry.js';
 import { DATA_DIR } from './config/load.js';
 import { RuntimeConfig } from './config/runtime.js';
@@ -39,7 +38,6 @@ export async function buildServer({ config }: BuildOptions): Promise<{ app: Fast
   const backends = new BackendRegistry();
   backends.register(new ClaudeAdapter(config.pools.claude));
   backends.register(new CodexAdapter(config.pools.codex));
-  backends.register(new GeminiAdapter(config.pools.gemini));
 
   configureImageCache(config.imageCache);
   startVisionDirSweeper();

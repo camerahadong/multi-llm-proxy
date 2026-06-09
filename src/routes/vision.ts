@@ -57,22 +57,38 @@ async function runVision(
     const controller = bindCancelController(req, reply);
 
     const fullPrompt = `${body.prompt}\n\n${tmpPaths.map((p) => `@${p}`).join('\n')}`;
-    const adapter = ctx.backends.get(resolved.backend);
 
     const start = Date.now();
     logger.info({ app: appName, model: resolved.model, backend: resolved.backend, images: tmpPaths.length }, 'vision ←');
 
-    const result = await adapter.call(
-      {
-        userPrompt: resolved.backend === 'codex' ? body.prompt : fullPrompt,
-        systemPrompt: body.system,
-        imagePaths: tmpPaths,
-        model: resolved.model,
-        visionMode: resolved.backend === 'claude',
-        timeoutMs,
-      },
-      controller.signal,
-    );
+    // Mirror chat.ts fallback: Claude vision dies often (CLI exit 143) → fall through
+    // to Codex with the same images. Without this the caller (vision-pick / anti-copy)
+    // gets a hard 500 every time Claude pool is degraded.
+    const callBackend = (target: typeof resolved.backend) => {
+      const ad = ctx.backends.get(target);
+      return ad.call(
+        {
+          userPrompt: target === 'codex' ? body.prompt! : fullPrompt,
+          systemPrompt: body.system,
+          imagePaths: tmpPaths,
+          model: resolved.model,
+          visionMode: target === 'claude',
+          timeoutMs,
+        },
+        controller.signal,
+      );
+    };
+
+    let result;
+    try {
+      result = await callBackend(resolved.backend);
+    } catch (err) {
+      if (resolved.backend !== 'claude') throw err;
+      if (controller.signal.aborted) throw err;
+      logger.warn({ err: (err as Error).message }, 'claude vision failed → codex fallback');
+      result = await callBackend('codex');
+      result.model = `codex:fallback-from-${resolved.model}`;
+    }
 
     const elapsed = Date.now() - start;
     ctx.stats.track({

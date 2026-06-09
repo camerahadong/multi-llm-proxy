@@ -1,4 +1,4 @@
-export type BackendName = 'claude' | 'codex' | 'gemini';
+export type BackendName = 'claude' | 'codex';
 
 export interface CallInput {
   userPrompt: string;

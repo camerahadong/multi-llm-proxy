@@ -17,7 +17,11 @@ export function isClaudeQuotaMessage(content: string): boolean {
   return CLAUDE_QUOTA_PATTERNS.some((p) => text.includes(p)) || /resets?\s+\d/.test(text);
 }
 
-export function callClaudeCli(input: CallInput, signal: AbortSignal): Promise<CallResult> {
+export function callClaudeCli(
+  input: CallInput,
+  signal: AbortSignal,
+  configDir?: string,
+): Promise<CallResult> {
   return new Promise<CallResult>((resolve, reject) => {
     const { userPrompt, systemPrompt, model, visionMode, thinking, timeoutMs } = input;
     const effectiveMaxTurns = visionMode ? 3 : 1;
@@ -43,7 +47,11 @@ export function callClaudeCli(input: CallInput, signal: AbortSignal): Promise<Ca
     const proc = spawn('claude', args, {
       timeout: timeoutMs,
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, CLAUDE_CODE_ENTRYPOINT: 'cli' },
+      env: {
+        ...process.env,
+        CLAUDE_CODE_ENTRYPOINT: 'cli',
+        ...(configDir ? { CLAUDE_CONFIG_DIR: configDir } : {}),
+      },
     });
     proc.stdin.end();
 
