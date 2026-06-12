@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFile, appendFileSync, closeSync, mkdirSync, openSync, readFileSync, readSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { logger } from './logger.js';
 
@@ -36,6 +36,8 @@ export interface TrackInput {
 export class StatsStore {
   private stats: StatsShape;
   private flushTimer: NodeJS.Timeout | null = null;
+  private logBuf: string[] = [];
+  private logFlushTimer: NodeJS.Timeout | null = null;
 
   constructor(
     private readonly statsFile: string,
@@ -73,6 +75,51 @@ export class StatsStore {
       writeFileSync(this.statsFile, JSON.stringify(this.stats, null, 2));
     } catch (err) {
       logger.error({ err: (err as Error).message }, 'stats flush failed');
+    }
+    this.flushLogSync();
+  }
+
+  /** Buffered access-log writes: append goes through an in-memory buffer flushed
+   * async every 2s (or at 200 lines) so the request path never blocks on disk. */
+  private queueLogLine(line: string): void {
+    this.logBuf.push(line);
+    if (this.logBuf.length >= 200) {
+      this.flushLog();
+      return;
+    }
+    if (this.logFlushTimer) return;
+    this.logFlushTimer = setTimeout(() => {
+      this.logFlushTimer = null;
+      this.flushLog();
+    }, 2000);
+    this.logFlushTimer.unref?.();
+  }
+
+  private flushLog(): void {
+    if (this.logFlushTimer) {
+      clearTimeout(this.logFlushTimer);
+      this.logFlushTimer = null;
+    }
+    if (this.logBuf.length === 0) return;
+    const chunk = this.logBuf.join('');
+    this.logBuf = [];
+    appendFile(this.logFile, chunk, (err) => {
+      if (err) logger.error({ err: err.message }, 'log append failed');
+    });
+  }
+
+  private flushLogSync(): void {
+    if (this.logFlushTimer) {
+      clearTimeout(this.logFlushTimer);
+      this.logFlushTimer = null;
+    }
+    if (this.logBuf.length === 0) return;
+    const chunk = this.logBuf.join('');
+    this.logBuf = [];
+    try {
+      appendFileSync(this.logFile, chunk);
+    } catch (err) {
+      logger.error({ err: (err as Error).message }, 'log append failed');
     }
   }
 
@@ -121,11 +168,7 @@ export class StatsStore {
       const ip = input.ip ?? '-';
       const ua = (input.userAgent ?? '-').replace(/\|/g, '/').slice(0, 80);
       const line = `${new Date().toISOString()} | ${app} | ${ip} | ${input.model} | in=${input.inputTokens} out=${input.outputTokens} | $${input.cost.toFixed(4)} | ${input.duration}ms | ${input.success ? 'OK' : 'ERR'} | ${ua}\n`;
-      try {
-        appendFileSync(this.logFile, line);
-      } catch (err) {
-        logger.error({ err: (err as Error).message }, 'log append failed');
-      }
+      this.queueLogLine(line);
     }
   }
 
@@ -140,11 +183,7 @@ export class StatsStore {
     const ua = (input.userAgent ?? '-').replace(/\|/g, '/').slice(0, 80);
     const reason = input.reason.replace(/\|/g, '/').slice(0, 40);
     const line = `${new Date().toISOString()} | ${app} | ${ip} | DENIED:${reason} | in=0 out=0 | $0.0000 | 0ms | ${input.status} | ${ua}\n`;
-    try {
-      appendFileSync(this.logFile, line);
-    } catch (err) {
-      logger.error({ err: (err as Error).message }, 'denied-log append failed');
-    }
+    this.queueLogLine(line);
   }
 
   snapshot(): StatsShape {
@@ -157,8 +196,27 @@ export class StatsStore {
   }
 
   readLogs(n: number): { total: number; lines: string[] } {
+    this.flushLogSync();
+    // Read only the tail window — log file grows unbounded and loading it
+    // whole would block the event loop and balloon memory.
+    const WINDOW = 512 * 1024;
     try {
-      const all = readFileSync(this.logFile, 'utf-8').trim().split('\n');
+      const size = statSync(this.logFile).size;
+      let text: string;
+      if (size > WINDOW) {
+        const fd = openSync(this.logFile, 'r');
+        try {
+          const buf = Buffer.alloc(WINDOW);
+          readSync(fd, buf, 0, WINDOW, size - WINDOW);
+          text = buf.toString('utf-8');
+          text = text.slice(text.indexOf('\n') + 1); // drop partial first line
+        } finally {
+          closeSync(fd);
+        }
+      } else {
+        text = readFileSync(this.logFile, 'utf-8');
+      }
+      const all = text.trim().split('\n');
       return { total: all.length, lines: all.slice(-n) };
     } catch {
       return { total: 0, lines: [] };

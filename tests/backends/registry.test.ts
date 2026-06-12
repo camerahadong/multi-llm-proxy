@@ -12,10 +12,10 @@ describe('resolveModel', () => {
     expect(resolveModel('o3').backend).toBe('codex');
   });
 
-  it('routes gemini models and aliases', () => {
-    expect(resolveModel('gemini-2.5-pro').backend).toBe('gemini');
-    expect(resolveModel('flash').model).toBe('gemini-2.5-flash');
-    expect(resolveModel('pro-3.1').model).toBe('gemini-3.1-pro-preview');
+  it('routes opus aliases to opus-4-8', () => {
+    expect(resolveModel('opus').model).toBe('claude-opus-4-8');
+    expect(resolveModel('best').model).toBe('claude-opus-4-8');
+    expect(resolveModel('opus-4-6').model).toBe('claude-opus-4-6');
   });
 
   it('strips -thinking suffix and flags thinking', () => {

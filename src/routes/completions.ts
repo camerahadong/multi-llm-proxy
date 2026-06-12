@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { BackendBusyError } from '../backends/errors.js';
+import { BackendBusyError, publicErrorMessage } from '../backends/errors.js';
+import { logger } from '../lib/logger.js';
 import { resolveModel } from '../backends/registry.js';
 import { clientIp, clientUserAgent } from '../lib/client-info.js';
 import { authenticate } from '../middleware/auth.js';
@@ -49,7 +50,8 @@ export async function completionsRoute(app: FastifyInstance, ctx: AppContext): P
         return { error: { message: err.message, type: 'backend_busy', code: 'backend_busy' } };
       }
       reply.code(500);
-      return { error: { message: (err as Error).message, type: 'server_error', code: 'internal_error' } };
+      logger.error({ err: (err as Error).message }, 'completions error');
+      return { error: { message: publicErrorMessage(err), type: 'server_error', code: 'internal_error' } };
     }
   });
 }

@@ -71,7 +71,7 @@ export function saveBase64Image(dataUrlOrB64: string, mimeHint?: string): string
 }
 
 export async function fetchImageToTmp(url: string): Promise<string> {
-  const resp = await fetch(url);
+  const resp = await fetch(url, { signal: AbortSignal.timeout(20_000) });
   if (!resp.ok) throw new Error(`fetch image failed: HTTP ${resp.status}`);
   const buf = Buffer.from(await resp.arrayBuffer());
   const mime = (resp.headers.get('content-type') ?? '').split(';')[0].toLowerCase();

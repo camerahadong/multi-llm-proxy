@@ -43,3 +43,21 @@ export class BackendCancelledError extends BackendError {
     this.name = 'BackendCancelledError';
   }
 }
+
+/**
+ * Client-safe error message for 500 responses. Proxy-generated errors
+ * (timeout, cancel, busy, quota) have intentional messages and pass through;
+ * anything else may contain CLI stderr or file paths and is replaced with a
+ * generic message — full detail stays in server logs.
+ */
+export function publicErrorMessage(err: unknown): string {
+  if (
+    err instanceof BackendBusyError ||
+    err instanceof BackendTimeoutError ||
+    err instanceof BackendCancelledError ||
+    err instanceof BackendQuotaError
+  ) {
+    return err.message;
+  }
+  return 'Upstream backend error';
+}

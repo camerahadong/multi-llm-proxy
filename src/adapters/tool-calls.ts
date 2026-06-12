@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 export interface ToolDefinition {
   function?: { name: string; description?: string; parameters?: unknown };
   name?: string;
@@ -54,8 +56,8 @@ export function parseToolCalls(content: string): ParsedToolCalls {
     if (!parsed.tool_calls || !Array.isArray(parsed.tool_calls) || parsed.tool_calls.length === 0) return null;
     return {
       isToolCall: true,
-      toolCalls: parsed.tool_calls.map((tc, i) => ({
-        id: `call_${Date.now()}_${i}`,
+      toolCalls: parsed.tool_calls.map((tc) => ({
+        id: `call_${randomUUID()}`,
         type: 'function' as const,
         function: {
           name: tc.name,

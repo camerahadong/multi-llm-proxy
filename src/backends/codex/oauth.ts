@@ -107,6 +107,7 @@ async function doRefreshCodexToken(): Promise<boolean> {
       await sendTelegramAlert('codex_failure', 'incident',
         `⚠️ <b>Codex proxy</b>\n\n❌ Token refresh thất bại ${refreshFailCount} lần: ${(err as Error).message}`);
     }
+    if (refreshTimer) clearTimeout(refreshTimer);
     refreshTimer = setTimeout(() => refreshCodexToken(), 30 * 60_000);
     refreshTimer.unref?.();
     return false;

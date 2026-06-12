@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { isClaudeQuotaMessage } from '../backends/claude/cli.js';
-import { BackendBusyError } from '../backends/errors.js';
+import { BackendBusyError, publicErrorMessage } from '../backends/errors.js';
 import { resolveModel } from '../backends/registry.js';
 import { normaliseOpenAiMessages, type OpenAiMessage } from '../adapters/openai-input.js';
 import {
@@ -404,7 +404,7 @@ export async function messagesRoute(app: FastifyInstance, ctx: AppContext): Prom
       }
       reply.code(500);
       logger.error({ err: (err as Error).message, app: appName }, 'messages error');
-      return { type: 'error', error: { type: 'api_error', message: (err as Error).message } };
+      return { type: 'error', error: { type: 'api_error', message: publicErrorMessage(err) } };
     }
   });
 }

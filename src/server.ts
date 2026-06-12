@@ -65,7 +65,7 @@ export async function buildServer({ config }: BuildOptions): Promise<{ app: Fast
 
   app.setErrorHandler((err: Error, req, reply) => {
     logger.error({ err: err.message, path: req.url }, 'unhandled error');
-    if (!reply.sent) reply.code(500).send({ error: { message: err.message, type: 'server_error' } });
+    if (!reply.sent) reply.code(500).send({ error: { message: 'Internal server error', type: 'server_error' } });
   });
 
   await app.register(cors, {

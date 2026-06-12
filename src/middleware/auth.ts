@@ -1,6 +1,15 @@
+import { createHash, timingSafeEqual } from 'node:crypto';
 import type { FastifyRequest } from 'fastify';
 import { normalizeApiKey } from '../config/schema.js';
 import type { RuntimeConfig } from '../config/runtime.js';
+
+/** Constant-time key comparison. Hashing first equalises lengths so
+ * timingSafeEqual never throws and length itself leaks nothing. */
+function safeKeyCompare(a: string, b: string): boolean {
+  const ha = createHash('sha256').update(a).digest();
+  const hb = createHash('sha256').update(b).digest();
+  return timingSafeEqual(ha, hb);
+}
 
 export interface AuthContext {
   app: string;
@@ -43,7 +52,7 @@ export function authenticate(req: FastifyRequest, runtime: RuntimeConfig): AuthO
 
   for (const entry of cfg.apiKeys) {
     const norm = normalizeApiKey(entry);
-    if (norm.key === token) {
+    if (safeKeyCompare(norm.key, token)) {
       return {
         ok: true,
         context: { app: norm.app ?? 'unknown', apiKey: token, rpmOverride: norm.rpm },

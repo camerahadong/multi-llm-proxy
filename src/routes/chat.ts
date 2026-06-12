@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { isClaudeQuotaMessage } from '../backends/claude/cli.js';
-import { BackendBusyError } from '../backends/errors.js';
+import { BackendBusyError, publicErrorMessage } from '../backends/errors.js';
 import { resolveModel } from '../backends/registry.js';
 import { normaliseOpenAiMessages, type OpenAiMessage } from '../adapters/openai-input.js';
 import { buildChatResponse } from '../adapters/openai-output.js';
@@ -170,7 +170,7 @@ export async function chatRoute(app: FastifyInstance, ctx: AppContext): Promise<
       }
       reply.code(500);
       logger.error({ err: (err as Error).message, app: appName }, 'chat error');
-      return { error: { message: (err as Error).message, type: 'server_error' } };
+      return { error: { message: publicErrorMessage(err), type: 'server_error' } };
     }
   });
 }
