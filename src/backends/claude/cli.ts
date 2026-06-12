@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { tmpdir } from 'node:os';
 import { killSubprocess } from '../../lib/kill-process.js';
 import { logger } from '../../lib/logger.js';
 import { BackendCancelledError, BackendError, BackendTimeoutError } from '../errors.js';
@@ -50,6 +51,9 @@ export function callClaudeCli(
     const proc = spawn('claude', args, {
       timeout: timeoutMs,
       stdio: ['pipe', 'pipe', 'pipe'],
+      // Neutral cwd: running in the proxy repo leaks its git status/file list
+      // into the model's context (and wastes tokens) on every request.
+      cwd: tmpdir(),
       env: {
         ...process.env,
         CLAUDE_CODE_ENTRYPOINT: 'cli',

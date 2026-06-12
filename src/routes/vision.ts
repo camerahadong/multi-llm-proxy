@@ -4,7 +4,7 @@ import { resolveModel } from '../backends/registry.js';
 import { clientIp, clientUserAgent } from '../lib/client-info.js';
 import { cleanupTempFiles, fetchImageToTmp, saveBase64Image } from '../lib/image-store.js';
 import { logger } from '../lib/logger.js';
-import { authenticate } from '../middleware/auth.js';
+import { guardRequest } from '../lib/pipeline.js';
 import { bindCancelController } from '../middleware/cancel.js';
 import type { AppContext } from '../types/index.js';
 
@@ -134,20 +134,9 @@ async function runVision(
 
 export async function visionRoute(app: FastifyInstance, ctx: AppContext): Promise<void> {
   const handler = async (req: FastifyRequest, reply: FastifyReply) => {
-    const auth = authenticate(req, ctx.runtime);
-    if (!auth.ok) {
-      ctx.stats.logDenied({ ip: clientIp(req), userAgent: clientUserAgent(req), status: 401, reason: auth.error });
-      reply.code(401);
-      return { error: { message: auth.error, type: 'invalid_request_error', code: 'invalid_api_key' } };
-    }
-    const rate = ctx.rate.check(auth.context);
-    if (!rate.ok) {
-      ctx.stats.logDenied({ app: auth.context.app, ip: clientIp(req), userAgent: clientUserAgent(req), status: 429, reason: 'rate_limit' });
-      reply.code(429).header('Retry-After', String(rate.retryAfter));
-      return { error: { message: `Rate limit exceeded: max ${rate.limit} req/min`, type: 'requests', code: 'rate_limit_exceeded' } };
-    }
-    const appName = auth.context.app || ((req.headers['x-app-name'] as string) ?? 'unknown');
-    return runVision((req.body ?? {}) as VisionBody, ctx, reply, req, appName);
+    const guard = guardRequest(req, reply, ctx, 'openai');
+    if (!guard.ok) return guard.payload;
+    return runVision((req.body ?? {}) as VisionBody, ctx, reply, req, guard.appName);
   };
 
   app.post('/v1/vision', handler);

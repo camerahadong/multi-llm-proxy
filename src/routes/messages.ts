@@ -1,8 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { isClaudeQuotaMessage } from '../backends/claude/cli.js';
 import { BackendBusyError, publicErrorMessage } from '../backends/errors.js';
-import { resolveModel } from '../backends/registry.js';
-import { normaliseOpenAiMessages, type OpenAiMessage } from '../adapters/openai-input.js';
+import { normaliseOpenAiMessages, type NormalisedInput, type OpenAiMessage } from '../adapters/openai-input.js';
 import {
   buildToolSystemPrompt,
   parseToolCalls,
@@ -11,10 +9,9 @@ import {
   type ToolDefinition,
 } from '../adapters/tool-calls.js';
 import type { CallResult } from '../backends/types.js';
-import { clientIp, clientUserAgent } from '../lib/client-info.js';
 import { cleanupTempFiles } from '../lib/image-store.js';
 import { logger } from '../lib/logger.js';
-import { authenticate } from '../middleware/auth.js';
+import { callWithFallback, guardRequest, recordOutcome, resolveRequestedModel } from '../lib/pipeline.js';
 import { bindCancelController } from '../middleware/cancel.js';
 import type { AppContext } from '../types/index.js';
 
@@ -255,34 +252,28 @@ function writeAnthropicStream(reply: FastifyReply, result: CallResult, parsed: P
 export async function messagesRoute(app: FastifyInstance, ctx: AppContext): Promise<void> {
   // Rough token estimate so Anthropic clients that pre-flight `count_tokens` don't 404.
   app.post('/v1/messages/count_tokens', async (req: FastifyRequest, reply: FastifyReply) => {
-    const auth = authenticate(req, ctx.runtime);
-    if (!auth.ok) {
-      reply.code(401);
-      return { type: 'error', error: { type: 'authentication_error', message: auth.error } };
-    }
+    const guard = guardRequest(req, reply, ctx, 'anthropic', { rateLimit: false });
+    if (!guard.ok) return guard.payload;
     const body = (req.body ?? {}) as MessagesBody;
     const text = systemToString(body.system) + ' ' + JSON.stringify(body.messages ?? []);
     return { input_tokens: Math.max(1, Math.ceil(text.length / 4)) };
   });
 
   app.post('/v1/messages', async (req: FastifyRequest, reply: FastifyReply) => {
-    const auth = authenticate(req, ctx.runtime);
-    if (!auth.ok) {
-      reply.code(401);
-      return { type: 'error', error: { type: 'authentication_error', message: auth.error } };
-    }
+    const guard = guardRequest(req, reply, ctx, 'anthropic', { defaultApp: 'anthropic' });
+    if (!guard.ok) return guard.payload;
+    const appName = guard.appName;
 
-    const rate = ctx.rate.check(auth.context);
-    if (!rate.ok) {
-      reply.code(429).header('Retry-After', String(rate.retryAfter));
-      return {
-        type: 'error',
-        error: { type: 'rate_limit_error', message: `Rate limit exceeded: max ${rate.limit} req/min` },
-      };
+    const idemKey = req.headers['idempotency-key'] as string | undefined;
+    if (idemKey) {
+      const cached = ctx.idempotency.get(idemKey, '/v1/messages', req.body);
+      if (cached) {
+        reply.code(cached.status).header('Idempotent-Replay', 'true');
+        return cached.body;
+      }
     }
 
     const start = Date.now();
-    const appName = auth.context.app || ((req.headers['x-app-name'] as string) ?? 'anthropic');
     const body = (req.body ?? {}) as MessagesBody;
     const controller = bindCancelController(req, reply);
 
@@ -294,108 +285,57 @@ export async function messagesRoute(app: FastifyInstance, ctx: AppContext): Prom
     const wantStream = !!body.stream;
     const hasTools = !!(tools && tools.length > 0);
 
-    let backendName: 'claude' | 'codex' = 'claude';
-    let model = body.model ?? cfg.defaultModel;
-    let routeReason = '';
-    let enableThinking = !!body.thinking;
-
-    if (model === 'auto' || model === 'smart') {
-      model = 'claude-sonnet-4-6';
-      routeReason = ' [auto]';
-    } else {
-      const resolved = resolveModel(model);
-      backendName = resolved.backend;
-      model = resolved.model;
-      if (resolved.thinking) enableThinking = true;
-      routeReason = ` [${backendName}]`;
-    }
-    if (enableThinking) routeReason += ' [thinking]';
-
-    const system = systemToString(body.system);
-    const oaMessages = toOpenAiMessages(system, body.messages ?? []);
-    const normalised = await normaliseOpenAiMessages(oaMessages, toolPrompt);
+    const route = resolveRequestedModel(body.model, cfg.defaultModel, !!body.thinking);
+    const { backendName, model } = route;
     const timeoutMs = cfg.timeoutSeconds * 1000;
 
-    logger.info(
-      {
-        app: appName,
-        model,
-        backend: backendName,
-        msgCount: body.messages?.length ?? 0,
-        tools: hasTools ? tools!.length : 0,
-        images: normalised.imagePaths.length,
-        stream: wantStream,
-        api: 'anthropic',
-      },
-      `messages ← ${appName} | ${model}${routeReason}`,
-    );
-
-    ctx.metrics.backendQueueDepth.observe({ backend: backendName }, ctx.backends.get(backendName).stats().queueDepth);
-
+    let normalised: NormalisedInput | undefined;
     try {
-      const call = (target: typeof backendName) => {
-        const adapter = ctx.backends.get(target);
-        return adapter.call(
-          {
-            userPrompt: normalised.userPrompt,
-            systemPrompt: normalised.systemPrompt || undefined,
-            imagePaths: normalised.imagePaths,
-            model,
-            visionMode: normalised.imagePaths.length > 0 && target === 'claude',
-            thinking: enableThinking,
-            timeoutMs,
-          },
-          controller.signal,
-        );
-      };
+      const system = systemToString(body.system);
+      const oaMessages = toOpenAiMessages(system, body.messages ?? []);
+      normalised = await normaliseOpenAiMessages(oaMessages, toolPrompt);
 
-      let result;
-      try {
-        result = await call(backendName);
-        if (backendName === 'claude' && isClaudeQuotaMessage(result.content)) {
-          logger.warn({ snippet: result.content.slice(0, 160) }, 'claude quota detected — falling back to codex');
-          throw new Error(result.content);
-        }
-      } catch (err) {
-        if (backendName !== 'claude') throw err;
-        if (controller.signal.aborted) throw err;
-        result = await call('codex');
-        result.model = `codex:fallback-from-${model}`;
-      }
+      logger.info(
+        {
+          app: appName,
+          model,
+          backend: backendName,
+          msgCount: body.messages?.length ?? 0,
+          tools: hasTools ? tools!.length : 0,
+          images: normalised.imagePaths.length,
+          stream: wantStream,
+          api: 'anthropic',
+        },
+        `messages ← ${appName} | ${model}${route.routeReason}`,
+      );
+      ctx.metrics.backendQueueDepth.observe({ backend: backendName }, ctx.backends.get(backendName).stats().queueDepth);
+
+      const result = await callWithFallback(ctx, {
+        normalised,
+        model,
+        backendName,
+        thinking: route.thinking,
+        timeoutMs,
+        signal: controller.signal,
+      });
 
       const elapsed = Date.now() - start;
       const parsed = hasTools
         ? parseToolCalls(result.content)
         : { isToolCall: false, toolCalls: null, textContent: result.content };
-
-      ctx.stats.track({
-        app: appName,
-        model,
-        duration: elapsed,
-        success: true,
-        inputTokens: result.inputTokens,
-        outputTokens: result.outputTokens,
-        cost: result.cost,
-        ip: clientIp(req),
-        userAgent: clientUserAgent(req),
-      });
-      ctx.metrics.requestsTotal.inc({ backend: backendName, model, status: 'ok' });
-      ctx.metrics.requestDuration.observe({ backend: backendName, model }, elapsed);
+      recordOutcome(ctx, req, { appName, backendName, model, elapsed, success: true, result });
 
       if (wantStream) {
         writeAnthropicStream(reply, result, parsed);
-        cleanupTempFiles(normalised.imagePaths);
         return reply;
       }
 
       const response = buildAnthropicResponse(result, parsed);
-      cleanupTempFiles(normalised.imagePaths);
+      if (idemKey) ctx.idempotency.set(idemKey, '/v1/messages', req.body, { status: 200, body: response });
       return response;
     } catch (err) {
-      cleanupTempFiles(normalised.imagePaths);
       const elapsed = Date.now() - start;
-      ctx.stats.track({ app: appName, model: 'unknown', duration: elapsed, success: false, inputTokens: 0, outputTokens: 0, cost: 0, ip: clientIp(req), userAgent: clientUserAgent(req) });
-      ctx.metrics.requestsTotal.inc({ backend: backendName, model, status: 'error' });
+      recordOutcome(ctx, req, { appName, backendName, model, elapsed, success: false });
 
       if (err instanceof BackendBusyError) {
         ctx.metrics.backendBusyTotal.inc({ backend: err.backend });
@@ -405,6 +345,8 @@ export async function messagesRoute(app: FastifyInstance, ctx: AppContext): Prom
       reply.code(500);
       logger.error({ err: (err as Error).message, app: appName }, 'messages error');
       return { type: 'error', error: { type: 'api_error', message: publicErrorMessage(err) } };
+    } finally {
+      if (normalised) cleanupTempFiles(normalised.imagePaths);
     }
   });
 }

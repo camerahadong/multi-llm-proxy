@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { killSubprocess } from '../../lib/kill-process.js';
 import { logger } from '../../lib/logger.js';
@@ -35,6 +36,9 @@ export function callCodexCli(input: CallInput, signal: AbortSignal): Promise<Cal
     const proc = spawn(CODEX_BIN, args, {
       timeout: timeoutMs,
       stdio: ['pipe', 'pipe', 'pipe'],
+      // Neutral cwd — same reason as claude/cli.ts: don't leak the proxy repo
+      // into the model's workspace context.
+      cwd: tmpdir(),
       env: {
         ...process.env,
         PATH: `${process.env.HOME}/.npm-global/bin:${process.env.PATH}`,
