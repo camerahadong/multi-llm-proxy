@@ -1,6 +1,7 @@
 import { createReadStream, existsSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { logger } from '../lib/logger.js';
 
 /**
  * One-shot file download (port of legacy /dl/<token>). Disabled unless both
@@ -10,6 +11,10 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
  * The route is intentionally kept outside the auth/rate-limit middleware: it
  * gates access on the URL token instead, matching v1.x behavior.
  */
+// Tokens currently being streamed. Closes the gap where two concurrent
+// requests both pass the flag-file check before the first one finishes.
+const inFlight = new Set<string>();
+
 export async function downloadRoute(app: FastifyInstance): Promise<void> {
   app.get('/dl/*', async (req: FastifyRequest, reply: FastifyReply) => {
     const token = process.env.DOWNLOAD_TOKEN;
@@ -26,10 +31,11 @@ export async function downloadRoute(app: FastifyInstance): Promise<void> {
       reply.code(404);
       return { error: 'not found' };
     }
-    if (existsSync(flagPath)) {
+    if (existsSync(flagPath) || inFlight.has(token)) {
       reply.code(410);
       return { error: 'gone (already downloaded)' };
     }
+    inFlight.add(token);
     try {
       const stat = statSync(file);
       reply
@@ -43,11 +49,19 @@ export async function downloadRoute(app: FastifyInstance): Promise<void> {
         } catch {
           /* ignore */
         }
+        inFlight.delete(token);
+      });
+      // Failed/aborted stream: release the token so the download can be retried.
+      stream.on('error', () => inFlight.delete(token));
+      reply.raw.on('close', () => {
+        if (!existsSync(flagPath)) inFlight.delete(token);
       });
       return reply.send(stream);
     } catch (err) {
+      inFlight.delete(token);
       reply.code(500);
-      return { error: (err as Error).message };
+      logger.error({ err: (err as Error).message }, 'download error');
+      return { error: 'download failed' };
     }
   });
 }

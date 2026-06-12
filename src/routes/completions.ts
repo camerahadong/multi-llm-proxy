@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { BackendBusyError, publicErrorMessage } from '../backends/errors.js';
 import { logger } from '../lib/logger.js';
 import { resolveModel } from '../backends/registry.js';
-import { guardRequest } from '../lib/pipeline.js';
+import { guardRequest, recordOutcome } from '../lib/pipeline.js';
 import { bindCancelController } from '../middleware/cancel.js';
 import type { AppContext } from '../types/index.js';
 
@@ -20,11 +20,20 @@ export async function completionsRoute(app: FastifyInstance, ctx: AppContext): P
     const resolved = resolveModel(body.model ?? ctx.runtime.get().defaultModel);
     const timeoutMs = (body.timeout ?? ctx.runtime.get().timeoutSeconds) * 1000;
     const controller = bindCancelController(req, reply);
+    const start = Date.now();
     try {
       const result = await ctx.backends.get(resolved.backend).call(
         { userPrompt: body.prompt ?? '', model: resolved.model, timeoutMs },
         controller.signal,
       );
+      recordOutcome(ctx, req, {
+        appName: guard.appName,
+        backendName: resolved.backend,
+        model: resolved.model,
+        elapsed: Date.now() - start,
+        success: true,
+        result,
+      });
       return {
         id: `cmpl-${Date.now()}`,
         object: 'text_completion',
@@ -34,6 +43,13 @@ export async function completionsRoute(app: FastifyInstance, ctx: AppContext): P
         usage: { prompt_tokens: result.inputTokens, completion_tokens: result.outputTokens, total_tokens: result.inputTokens + result.outputTokens },
       };
     } catch (err) {
+      recordOutcome(ctx, req, {
+        appName: guard.appName,
+        backendName: resolved.backend,
+        model: resolved.model,
+        elapsed: Date.now() - start,
+        success: false,
+      });
       if (err instanceof BackendBusyError) {
         reply.code(429).header('Retry-After', String(err.retryAfterSec));
         return { error: { message: err.message, type: 'backend_busy', code: 'backend_busy' } };

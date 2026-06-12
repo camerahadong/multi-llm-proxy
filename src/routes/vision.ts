@@ -1,10 +1,10 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { BackendBusyError, publicErrorMessage } from '../backends/errors.js';
 import { resolveModel } from '../backends/registry.js';
-import { clientIp, clientUserAgent } from '../lib/client-info.js';
+
 import { cleanupTempFiles, fetchImageToTmp, saveBase64Image } from '../lib/image-store.js';
 import { logger } from '../lib/logger.js';
-import { guardRequest } from '../lib/pipeline.js';
+import { guardRequest, recordOutcome } from '../lib/pipeline.js';
 import { bindCancelController } from '../middleware/cancel.js';
 import type { AppContext } from '../types/index.js';
 
@@ -45,20 +45,19 @@ async function runVision(
   }
 
   const tmpPaths: string[] = [];
+  const resolved = resolveModel(body.model ?? 'claude-haiku-4-5-20251001');
+  const start = Date.now();
   try {
     for (const it of inputs) {
       const p = it.url ? await fetchImageToTmp(it.url) : saveBase64Image(it.data!, it.mime);
       tmpPaths.push(p);
     }
 
-    const resolved = resolveModel(body.model ?? 'claude-haiku-4-5-20251001');
     const cfg = ctx.runtime.get();
     const timeoutMs = (body.timeout ?? cfg.timeoutSeconds) * 1000;
     const controller = bindCancelController(req, reply);
 
     const fullPrompt = `${body.prompt}\n\n${tmpPaths.map((p) => `@${p}`).join('\n')}`;
-
-    const start = Date.now();
     logger.info({ app: appName, model: resolved.model, backend: resolved.backend, images: tmpPaths.length }, 'vision ←');
 
     // Mirror chat.ts fallback: Claude vision dies often (CLI exit 143) → fall through
@@ -91,19 +90,14 @@ async function runVision(
     }
 
     const elapsed = Date.now() - start;
-    ctx.stats.track({
-      app: appName,
+    recordOutcome(ctx, req, {
+      appName,
+      backendName: resolved.backend,
       model: resolved.model,
-      duration: elapsed,
+      elapsed,
       success: true,
-      inputTokens: result.inputTokens,
-      outputTokens: result.outputTokens,
-      cost: result.cost,
-      ip: clientIp(req),
-      userAgent: clientUserAgent(req),
+      result,
     });
-    ctx.metrics.requestsTotal.inc({ backend: resolved.backend, model: resolved.model, status: 'ok' });
-    ctx.metrics.requestDuration.observe({ backend: resolved.backend, model: resolved.model }, elapsed);
 
     return {
       content: result.content,
@@ -119,6 +113,13 @@ async function runVision(
       cost_usd: result.cost,
     };
   } catch (err) {
+    recordOutcome(ctx, req, {
+      appName,
+      backendName: resolved.backend,
+      model: resolved.model,
+      elapsed: Date.now() - start,
+      success: false,
+    });
     if (err instanceof BackendBusyError) {
       ctx.metrics.backendBusyTotal.inc({ backend: err.backend });
       reply.code(429).header('Retry-After', String(err.retryAfterSec));

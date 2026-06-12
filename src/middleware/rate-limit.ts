@@ -30,7 +30,9 @@ export class RateLimiter {
       bucket.timestamps.shift();
     }
     if (bucket.timestamps.length >= limit) {
-      const retryAfter = Math.max(1, Math.ceil((bucket.timestamps[0] + 60_000 - now) / 1000));
+      // floor+1 (not ceil): guarantees the oldest timestamp has left the window
+      // when the client retries exactly Retry-After seconds later.
+      const retryAfter = Math.max(1, Math.floor((bucket.timestamps[0] + 60_000 - now) / 1000) + 1);
       return { ok: false, limit, retryAfter };
     }
     bucket.timestamps.push(now);

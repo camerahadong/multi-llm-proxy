@@ -17,6 +17,7 @@ export const poolConfigSchema = z.object({
 export const configSchema = z.object({
   defaultModel: z.string().default('claude-sonnet-4-6'),
   timeoutSeconds: z.number().int().min(30).max(3600).default(900),
+  bodyLimitMb: z.number().int().min(1).max(100).default(50),
   allowedOrigins: z.array(z.string()).default(['*']),
   enableLogging: z.boolean().default(true),
 

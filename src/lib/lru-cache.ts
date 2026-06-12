@@ -13,7 +13,7 @@ export class TtlLruCache<V> {
   get(key: string): V | undefined {
     const entry = this.map.get(key);
     if (!entry) return undefined;
-    if (entry.expiresAt < Date.now()) {
+    if (entry.expiresAt <= Date.now()) {
       this.map.delete(key);
       return undefined;
     }
@@ -40,7 +40,7 @@ export class TtlLruCache<V> {
   sweep(): void {
     const now = Date.now();
     for (const [k, v] of this.map) {
-      if (v.expiresAt < now) this.map.delete(k);
+      if (v.expiresAt <= now) this.map.delete(k);
     }
   }
 

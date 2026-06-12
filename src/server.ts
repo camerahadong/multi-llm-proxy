@@ -56,7 +56,7 @@ export async function buildServer({ config }: BuildOptions): Promise<{ app: Fast
 
   const app = Fastify({
     logger: false,
-    bodyLimit: 50 * 1024 * 1024,
+    bodyLimit: runtime.get().bodyLimitMb * 1024 * 1024,
     trustProxy: true,
     requestTimeout: 0,
     keepAliveTimeout: 15 * 60_000,
