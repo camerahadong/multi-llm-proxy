@@ -135,11 +135,13 @@ export async function visionRoute(app: FastifyInstance, ctx: AppContext): Promis
   const handler = async (req: FastifyRequest, reply: FastifyReply) => {
     const auth = authenticate(req, ctx.runtime);
     if (!auth.ok) {
+      ctx.stats.logDenied({ ip: clientIp(req), userAgent: clientUserAgent(req), status: 401, reason: auth.error });
       reply.code(401);
       return { error: { message: auth.error, type: 'invalid_request_error', code: 'invalid_api_key' } };
     }
     const rate = ctx.rate.check(auth.context);
     if (!rate.ok) {
+      ctx.stats.logDenied({ app: auth.context.app, ip: clientIp(req), userAgent: clientUserAgent(req), status: 429, reason: 'rate_limit' });
       reply.code(429).header('Retry-After', String(rate.retryAfter));
       return { error: { message: `Rate limit exceeded: max ${rate.limit} req/min`, type: 'requests', code: 'rate_limit_exceeded' } };
     }

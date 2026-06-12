@@ -1,10 +1,13 @@
-import type { FastifyInstance, FastifyReply } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { getClaudeCredentials, refreshClaudeToken } from '../backends/claude/oauth.js';
 import { getCodexAuth, getCodexTokenExpiry, refreshCodexToken } from '../backends/codex/oauth.js';
 import type { AppContext } from '../types/index.js';
+import { authGuard } from '../middleware/require-auth.js';
 
-export async function tokenRoute(app: FastifyInstance, _ctx: AppContext): Promise<void> {
-  app.get('/token', async () => {
+export async function tokenRoute(app: FastifyInstance, ctx: AppContext): Promise<void> {
+  app.get('/token', async (req: FastifyRequest, reply: FastifyReply) => {
+    const denied = authGuard(req, ctx.runtime);
+    if (denied) { reply.code(denied.code); return denied.body; }
     const creds = getClaudeCredentials();
     if (!creds?.claudeAiOauth) return { status: 'no_credentials' };
     const oauth = creds.claudeAiOauth;
@@ -18,7 +21,9 @@ export async function tokenRoute(app: FastifyInstance, _ctx: AppContext): Promis
     };
   });
 
-  app.post('/token/refresh', async (_req, reply: FastifyReply) => {
+  app.post('/token/refresh', async (req: FastifyRequest, reply: FastifyReply) => {
+    const denied = authGuard(req, ctx.runtime);
+    if (denied) { reply.code(denied.code); return denied.body; }
     const ok = await refreshClaudeToken();
     if (!ok) {
       reply.code(500);
@@ -29,7 +34,9 @@ export async function tokenRoute(app: FastifyInstance, _ctx: AppContext): Promis
     return { ok: true, expiresAt: new Date(exp).toISOString(), remainingHours: +((exp - Date.now()) / 3600_000).toFixed(2) };
   });
 
-  app.get('/token/codex', async () => {
+  app.get('/token/codex', async (req: FastifyRequest, reply: FastifyReply) => {
+    const denied = authGuard(req, ctx.runtime);
+    if (denied) { reply.code(denied.code); return denied.body; }
     const expiresAt = getCodexTokenExpiry();
     if (!expiresAt) return { status: 'no_token' };
     const auth = getCodexAuth();
@@ -42,7 +49,9 @@ export async function tokenRoute(app: FastifyInstance, _ctx: AppContext): Promis
     };
   });
 
-  app.post('/token/codex/refresh', async (_req, reply: FastifyReply) => {
+  app.post('/token/codex/refresh', async (req: FastifyRequest, reply: FastifyReply) => {
+    const denied = authGuard(req, ctx.runtime);
+    if (denied) { reply.code(denied.code); return denied.body; }
     const ok = await refreshCodexToken();
     if (!ok) {
       reply.code(500);

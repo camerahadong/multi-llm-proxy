@@ -31,6 +31,9 @@ export function callClaudeCli(
       '--output-format', 'json',
       '--max-turns', String(effectiveMaxTurns),
       '--model', model,
+      // No user/project settings: keeps hooks/plugins (e.g. statusline banners)
+      // out of API responses. OAuth credentials still load from the config dir.
+      '--setting-sources', '',
     ];
 
     if (thinking) args.push('--think');

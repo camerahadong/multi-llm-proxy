@@ -129,6 +129,24 @@ export class StatsStore {
     }
   }
 
+  /**
+   * Log a denied request (auth failure / rate limit) to the access log without
+   * touching billing stats. Makes probing / key-guessing attempts visible.
+   */
+  logDenied(input: { app?: string; ip?: string; userAgent?: string; status: number; reason: string }): void {
+    if (!this.enableLogging()) return;
+    const app = input.app || 'denied';
+    const ip = input.ip ?? '-';
+    const ua = (input.userAgent ?? '-').replace(/\|/g, '/').slice(0, 80);
+    const reason = input.reason.replace(/\|/g, '/').slice(0, 40);
+    const line = `${new Date().toISOString()} | ${app} | ${ip} | DENIED:${reason} | in=0 out=0 | $0.0000 | 0ms | ${input.status} | ${ua}\n`;
+    try {
+      appendFileSync(this.logFile, line);
+    } catch (err) {
+      logger.error({ err: (err as Error).message }, 'denied-log append failed');
+    }
+  }
+
   snapshot(): StatsShape {
     return JSON.parse(JSON.stringify(this.stats)) as StatsShape;
   }

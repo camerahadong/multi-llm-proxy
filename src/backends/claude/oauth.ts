@@ -81,7 +81,7 @@ function cliRefresh(): Promise<boolean> {
     const before = getClaudeCredentials()?.claudeAiOauth?.expiresAt ?? 0;
     const proc = spawn(
       'claude',
-      ['-p', 'ping', '--output-format', 'json', '--max-turns', '1', '--model', 'claude-haiku-4-5-20251001'],
+      ['-p', 'ping', '--output-format', 'json', '--max-turns', '1', '--model', 'claude-haiku-4-5-20251001', '--setting-sources', ''],
       { timeout: 30000, env: { ...process.env, CLAUDE_CODE_ENTRYPOINT: 'cli' } },
     );
     proc.on('close', (code) => {

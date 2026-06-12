@@ -1,8 +1,11 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { AppContext } from '../types/index.js';
+import { authGuard } from '../middleware/require-auth.js';
 
 export async function statsRoute(app: FastifyInstance, ctx: AppContext): Promise<void> {
-  app.get('/stats', async () => {
+  app.get('/stats', async (req: FastifyRequest, reply) => {
+    const denied = authGuard(req, ctx.runtime);
+    if (denied) { reply.code(denied.code); return denied.body; }
     const snap = ctx.stats.snapshot();
     const today = new Date().toISOString().slice(0, 10);
     const todayStats = snap.daily[today] ?? { requests: 0, tokens: 0, cost: 0, errors: 0 };
@@ -32,12 +35,16 @@ export async function statsRoute(app: FastifyInstance, ctx: AppContext): Promise
     };
   });
 
-  app.delete('/stats', async () => {
+  app.delete('/stats', async (req: FastifyRequest, reply) => {
+    const denied = authGuard(req, ctx.runtime);
+    if (denied) { reply.code(denied.code); return denied.body; }
     ctx.stats.reset();
     return { ok: true, message: 'Stats reset' };
   });
 
-  app.get('/logs', async (req: FastifyRequest) => {
+  app.get('/logs', async (req: FastifyRequest, reply) => {
+    const denied = authGuard(req, ctx.runtime);
+    if (denied) { reply.code(denied.code); return denied.body; }
     const url = new URL(req.url, 'http://x');
     const n = parseInt(url.searchParams.get('n') ?? '50', 10);
     return ctx.stats.readLogs(n);
