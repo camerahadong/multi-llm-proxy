@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { killSubprocess } from '../../lib/kill-process.js';
 import { logger } from '../../lib/logger.js';
 import { BackendCancelledError, BackendError, BackendTimeoutError } from '../errors.js';
@@ -25,7 +26,10 @@ export function callClaudeCli(
 ): Promise<CallResult> {
   return new Promise<CallResult>((resolve, reject) => {
     const { userPrompt, systemPrompt, model, visionMode, thinking, timeoutMs } = input;
-    const effectiveMaxTurns = visionMode ? 3 : 1;
+    const imagePaths = input.imagePaths ?? [];
+    // Vision needs one Read turn per image plus a turn to answer. Give a little
+    // headroom so multi-image montages don't run out of turns mid-read.
+    const effectiveMaxTurns = visionMode ? Math.max(3, imagePaths.length + 2) : 1;
 
     const args = [
       '-p', userPrompt,
@@ -41,7 +45,24 @@ export function callClaudeCli(
 
     if (visionMode) {
       args.push('--allowedTools', 'Read');
-      if (systemPrompt) args.push('--append-system-prompt', systemPrompt);
+      // The images live outside cwd (tmpdir). In headless `-p` mode, `@path`
+      // mentions are NOT auto-expanded, so the model would otherwise reply
+      // "no image attached". Grant Read access to each image's directory and
+      // explicitly instruct the model to Read every absolute path BEFORE
+      // answering — this is what actually feeds the pixels into the context.
+      const imageDirs = [...new Set(imagePaths.map((p) => path.dirname(p)))];
+      for (const dir of imageDirs) args.push('--add-dir', dir);
+
+      let visionSystem = systemPrompt ?? '';
+      if (imagePaths.length > 0) {
+        const list = imagePaths.map((p) => `- ${p}`).join('\n');
+        const directive =
+          `You have been given ${imagePaths.length} image file(s) to analyse. ` +
+          `BEFORE answering, you MUST use the Read tool to open EACH of these absolute file paths:\n${list}\n` +
+          `Treat the file contents as the image(s) the user is asking about. Do not claim no image was attached.`;
+        visionSystem = visionSystem ? `${visionSystem}\n\n${directive}` : directive;
+      }
+      if (visionSystem) args.push('--append-system-prompt', visionSystem);
     } else {
       const noTools =
         '\n\nIMPORTANT: Do NOT use any built-in tools (WebSearch, WebFetch, Read, Edit, Bash, etc). Respond with text only.';
