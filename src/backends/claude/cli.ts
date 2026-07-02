@@ -19,6 +19,32 @@ export function isClaudeQuotaMessage(content: string): boolean {
   return CLAUDE_QUOTA_PATTERNS.some((p) => text.includes(p)) || /resets?\s+\d/.test(text);
 }
 
+/**
+ * Chon model that su tu json.modelUsage. CLI ghi ca cac lenh haiku nen
+ * (title/classify) vao modelUsage nen Object.keys()[0] co the tra ve haiku
+ * du cau tra loi chay tren model khac. Uu tien model duoc yeu cau; neu khong
+ * co thi lay key ton nhieu token nhat; cuoi cung fallback ve `requested`.
+ */
+export function pickUsedModel(
+  modelUsage: Record<string, { inputTokens?: number; outputTokens?: number }> | undefined,
+  requested: string,
+): string {
+  const keys = Object.keys(modelUsage ?? {});
+  if (keys.length === 0) return requested;
+  if (keys.includes(requested)) return requested;
+  let best = keys[0];
+  let bestTokens = -1;
+  for (const k of keys) {
+    const u = modelUsage![k];
+    const tok = (u?.inputTokens ?? 0) + (u?.outputTokens ?? 0);
+    if (tok > bestTokens) {
+      bestTokens = tok;
+      best = k;
+    }
+  }
+  return best;
+}
+
 export function callClaudeCli(
   input: CallInput,
   signal: AbortSignal,
@@ -112,7 +138,7 @@ export function callClaudeCli(
           resolve({
             content: String(json.result ?? ''),
             cost: json.total_cost_usd ?? 0,
-            model: Object.keys(json.modelUsage ?? {})[0] ?? model,
+            model: pickUsedModel(json.modelUsage, model),
             inputTokens: json.usage?.input_tokens ?? 0,
             outputTokens: json.usage?.output_tokens ?? 0,
             cacheRead: json.usage?.cache_read_input_tokens ?? 0,
