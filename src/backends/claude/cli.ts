@@ -14,9 +14,22 @@ export const CLAUDE_QUOTA_PATTERNS = [
   'quota',
 ];
 
+export const CLAUDE_AUTH_PATTERNS = [
+  'failed to authenticate',
+  'oauth session expired',
+  'authentication failed',
+  'invalid oauth token',
+  'please run /login',
+];
+
 export function isClaudeQuotaMessage(content: string): boolean {
   const text = content.toLowerCase();
   return CLAUDE_QUOTA_PATTERNS.some((p) => text.includes(p)) || /resets?\s+\d/.test(text);
+}
+
+export function isClaudeAuthMessage(content: string): boolean {
+  const text = content.toLowerCase();
+  return CLAUDE_AUTH_PATTERNS.some((pattern) => text.includes(pattern));
 }
 
 /**
@@ -26,7 +39,12 @@ export function isClaudeQuotaMessage(content: string): boolean {
  * co thi lay key ton nhieu token nhat; cuoi cung fallback ve `requested`.
  */
 export function pickUsedModel(
-  modelUsage: Record<string, { inputTokens?: number; outputTokens?: number }> | undefined,
+  modelUsage: Record<string, {
+    inputTokens?: number;
+    outputTokens?: number;
+    cacheReadInputTokens?: number;
+    cacheCreationInputTokens?: number;
+  }> | undefined,
   requested: string,
 ): string {
   const keys = Object.keys(modelUsage ?? {});
@@ -36,7 +54,11 @@ export function pickUsedModel(
   let bestTokens = -1;
   for (const k of keys) {
     const u = modelUsage![k];
-    const tok = (u?.inputTokens ?? 0) + (u?.outputTokens ?? 0);
+    const tok =
+      (u?.inputTokens ?? 0) +
+      (u?.outputTokens ?? 0) +
+      (u?.cacheReadInputTokens ?? 0) +
+      (u?.cacheCreationInputTokens ?? 0);
     if (tok > bestTokens) {
       bestTokens = tok;
       best = k;

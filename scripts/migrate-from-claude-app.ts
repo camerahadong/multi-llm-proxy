@@ -33,14 +33,13 @@ interface LegacyConfig {
 if (existsSync(oldConfigPath)) {
   const legacy = JSON.parse(readFileSync(oldConfigPath, 'utf-8')) as LegacyConfig;
   const next = {
-    defaultModel: legacy.defaultModel ?? 'claude-sonnet-4-6',
+    defaultModel: legacy.defaultModel ?? 'claude-sonnet-5',
     timeoutSeconds: legacy.timeout ?? 900,
     allowedOrigins: legacy.allowedOrigins ?? ['*'],
     enableLogging: legacy.enableLogging ?? true,
     pools: {
       claude: { size: 4, maxQueue: 8 },
       codex: { size: 2, maxQueue: 4 },
-      gemini: { size: 4, maxQueue: 8 },
     },
     rateLimit: { defaultRpm: legacy.rateLimitPerMinute ?? 60, perKey: {} },
     idempotency: { ttlSeconds: 300, maxEntries: 1000 },

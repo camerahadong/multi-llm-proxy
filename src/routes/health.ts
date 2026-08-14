@@ -9,8 +9,8 @@ function recommendedModel(ctx: AppContext): string {
   const claude = ctx.backends.get('claude').stats();
   const codex = ctx.backends.get('codex').stats();
   if (claude.status === 'limited' || claude.status === 'error') {
-    if (codex.status !== 'error') return 'gpt-5';
-    return 'claude-sonnet-4-6';
+    if (codex.status !== 'error') return 'gpt-5.6-terra';
+    return 'claude-sonnet-5';
   }
   return 'auto';
 }
@@ -41,8 +41,9 @@ export async function healthRoute(app: FastifyInstance, ctx: AppContext): Promis
     return {
       status: 'ok',
       service: 'Claude + Codex API Proxy',
-      version: '2.0.0',
-      guide: '/guide (markdown) | /guide?format=html (browser) | /guide?format=json (JSON)',
+      version: '2.1.0',
+      guide: '/guide?format=html (API) | /huong-dan?format=html (Tiếng Việt)',
+      agent: ctx.agent.status(),
       backends: backendsView,
       defaultModel: cfg.defaultModel,
       recommendedModel: recommendedModel(ctx),

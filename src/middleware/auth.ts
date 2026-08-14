@@ -15,6 +15,8 @@ export interface AuthContext {
   app: string;
   apiKey: string | null;
   rpmOverride: number | null;
+  isAdmin: boolean;
+  isLocal: boolean;
 }
 
 export interface AuthOk {
@@ -31,12 +33,25 @@ export function authenticate(req: FastifyRequest, runtime: RuntimeConfig): AuthO
   const cfg = runtime.get();
   const directIp = req.socket.remoteAddress ?? '';
   const isLocal = directIp === '127.0.0.1' || directIp === '::1' || directIp === '::ffff:127.0.0.1';
-  const viaProxy = !!req.headers['x-real-ip'];
+  // A tunnel/reverse proxy connects from loopback, so loopback alone must not
+  // grant admin privileges when any standard forwarding marker is present.
+  const viaProxy = Boolean(
+    req.headers['x-real-ip']
+    || req.headers['x-forwarded-for']
+    || req.headers['cf-connecting-ip']
+    || req.headers.forwarded,
+  );
 
   if (isLocal && !viaProxy) {
     return {
       ok: true,
-      context: { app: (req.headers['x-app-name'] as string) ?? 'local', apiKey: null, rpmOverride: null },
+      context: {
+        app: (req.headers['x-app-name'] as string) ?? 'local',
+        apiKey: null,
+        rpmOverride: null,
+        isAdmin: true,
+        isLocal: true,
+      },
     };
   }
 
@@ -55,7 +70,13 @@ export function authenticate(req: FastifyRequest, runtime: RuntimeConfig): AuthO
     if (safeKeyCompare(norm.key, token)) {
       return {
         ok: true,
-        context: { app: norm.app ?? 'unknown', apiKey: token, rpmOverride: norm.rpm },
+        context: {
+          app: norm.app ?? 'unknown',
+          apiKey: token,
+          rpmOverride: norm.rpm,
+          isAdmin: norm.admin,
+          isLocal: false,
+        },
       };
     }
   }

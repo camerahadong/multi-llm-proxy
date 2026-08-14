@@ -1,12 +1,11 @@
 {
-  "defaultModel": "claude-sonnet-4-6",
+  "defaultModel": "claude-sonnet-5",
   "timeoutSeconds": 900,
   "allowedOrigins": ["*"],
   "enableLogging": true,
   "pools": {
     "claude": { "size": 4, "maxQueue": 8 },
-    "codex":  { "size": 2, "maxQueue": 4 },
-    "gemini": { "size": 4, "maxQueue": 8 }
+    "codex":  { "size": 2, "maxQueue": 4 }
   },
   "rateLimit": {
     "defaultRpm": 60,
@@ -20,7 +19,22 @@
     "ttlSeconds": 600,
     "maxEntries": 200
   },
+  "agent": {
+    "enabled": false,
+    "codexCommand": "codex",
+    "defaultModel": "gpt-5.6-terra",
+    "allowedModels": ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.4"],
+    "defaultCwd": "/absolute/path/to/a/project",
+    "allowedRoots": ["/absolute/path/to"],
+    "writableRoots": ["/absolute/path/to/a/project"],
+    "defaultSandbox": "read-only",
+    "allowNetwork": false,
+    "maxSessions": 4,
+    "sessionTtlSeconds": 3600,
+    "maxEventsPerSession": 2000,
+    "rpcTimeoutSeconds": 30
+  },
   "apiKeys": [
-    { "key": "REPLACE_WITH_RANDOM_HEX_64CHARS", "app": "remote", "rpm": 60 }
+    { "key": "REPLACE_WITH_RANDOM_HEX_64CHARS", "app": "remote", "rpm": 60, "admin": false }
   ]
 }

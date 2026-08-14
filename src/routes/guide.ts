@@ -1,16 +1,16 @@
 import { readFileSync } from 'node:fs';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { GUIDE_FILE } from '../config/load.js';
+import { GUIDE_FILE, USER_GUIDE_VI_FILE } from '../config/load.js';
 import { renderMarkdown } from '../lib/markdown.js';
 
 export async function guideRoute(app: FastifyInstance): Promise<void> {
-  const handler = async (req: FastifyRequest, reply: FastifyReply) => {
+  const createHandler = (file: string, fileLabel: string) => async (req: FastifyRequest, reply: FastifyReply) => {
     let md: string;
     try {
-      md = readFileSync(GUIDE_FILE, 'utf-8');
+      md = readFileSync(file, 'utf-8');
     } catch {
       reply.code(500);
-      return { error: { message: 'API_GUIDE.md not found on server', type: 'server_error' } };
+      return { error: { message: `${fileLabel} not found on server`, type: 'server_error' } };
     }
     const url = new URL(req.url, 'http://x');
     const format = url.searchParams.get('format') ?? 'markdown';
@@ -32,7 +32,12 @@ export async function guideRoute(app: FastifyInstance): Promise<void> {
     return md;
   };
 
-  app.get('/guide', handler);
-  app.get('/docs', handler);
-  app.get('/help', handler);
+  const apiGuideHandler = createHandler(GUIDE_FILE, 'API_GUIDE.md');
+  const userGuideViHandler = createHandler(USER_GUIDE_VI_FILE, 'HUONG_DAN_SU_DUNG.md');
+
+  app.get('/guide', apiGuideHandler);
+  app.get('/docs', apiGuideHandler);
+  app.get('/help', apiGuideHandler);
+  app.get('/huong-dan', userGuideViHandler);
+  app.get('/huong-dan-su-dung', userGuideViHandler);
 }

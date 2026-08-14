@@ -1,6 +1,6 @@
 /**
  * Reproduce the BIBPIX-style concurrency test: N calls × M workers.
- * Usage: tsx scripts/bench-pool.ts [n=30] [workers=5] [model=gemini-2.5-flash]
+ * Usage: tsx scripts/bench-pool.ts [n=30] [workers=5] [model=claude-sonnet-5]
  */
 import { performance } from 'node:perf_hooks';
 
@@ -10,7 +10,7 @@ const API_KEY = process.env.PROXY_API_KEY ?? '';
 
 const n = parseInt(process.argv[2] ?? '30', 10);
 const workers = parseInt(process.argv[3] ?? '5', 10);
-const model = process.argv[4] ?? 'gemini-2.5-flash';
+const model = process.argv[4] ?? 'claude-sonnet-5';
 
 async function callOne(idx: number): Promise<{ idx: number; ms: number; ok: boolean; status: number }> {
   const t0 = performance.now();

@@ -8,8 +8,8 @@ export interface AuthDenied {
 }
 
 /**
- * Guard for admin/sensitive routes. Returns null when the request is allowed
- * (localhost or valid API key), or an {code, body} pair to send on denial.
+ * Guard for admin/sensitive routes. Localhost is trusted; remote requests must
+ * use an API key explicitly configured with `admin: true`.
  *
  * Usage in a handler:
  *   const denied = authGuard(req, ctx.runtime);
@@ -21,6 +21,18 @@ export function authGuard(req: FastifyRequest, runtime: RuntimeConfig): AuthDeni
     return {
       code: 401,
       body: { error: { message: auth.error, type: 'invalid_request_error', code: 'invalid_api_key' } },
+    };
+  }
+  if (!auth.context.isLocal && !auth.context.isAdmin) {
+    return {
+      code: 403,
+      body: {
+        error: {
+          message: 'Admin API key required',
+          type: 'permission_error',
+          code: 'admin_required',
+        },
+      },
     };
   }
   return null;

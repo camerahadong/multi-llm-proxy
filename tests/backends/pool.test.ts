@@ -49,7 +49,7 @@ describe('BackendPool', () => {
   });
 
   it('honours AbortSignal before running', async () => {
-    const pool = new BackendPool({ name: 'gemini', size: 1, maxQueue: 5 });
+    const pool = new BackendPool({ name: 'claude', size: 1, maxQueue: 5 });
     const gate = defer();
     void pool.submit(async () => gate.promise, new AbortController().signal);
     const abort = new AbortController();

@@ -1,7 +1,7 @@
 {
   "name": "multi-llm-proxy",
-  "version": "2.0.0",
-  "description": "OpenAI-compatible proxy unifying Claude (OAuth), Codex (ChatGPT Plus OAuth), Gemini (Google OAuth GCA) behind one endpoint, with per-backend process pool, backpressure, and Prometheus metrics.",
+  "version": "2.1.0",
+  "description": "OpenAI-compatible proxy unifying Claude (OAuth) and OpenAI models via Codex (ChatGPT Plus OAuth), with per-backend process pools, backpressure, and Prometheus metrics.",
   "type": "module",
   "private": true,
   "engines": {

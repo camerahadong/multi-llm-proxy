@@ -1,6 +1,7 @@
 import cors from '@fastify/cors';
 import sensible from '@fastify/sensible';
 import Fastify, { type FastifyInstance } from 'fastify';
+import { AgentService } from './agent/service.js';
 import { ClaudeAdapter } from './backends/claude/index.js';
 import { CodexAdapter } from './backends/codex/index.js';
 import { BackendRegistry } from './backends/registry.js';
@@ -14,6 +15,7 @@ import { StatsStore } from './lib/stats-store.js';
 import { IdempotencyStore } from './middleware/idempotency.js';
 import { RateLimiter } from './middleware/rate-limit.js';
 import { chatRoute } from './routes/chat.js';
+import { agentRoute } from './routes/agent.js';
 import { completionsRoute } from './routes/completions.js';
 import { configRoute } from './routes/config.js';
 import { downloadRoute } from './routes/download.js';
@@ -35,6 +37,7 @@ export interface BuildOptions {
 
 export async function buildServer({ config }: BuildOptions): Promise<{ app: FastifyInstance; ctx: AppContext }> {
   const runtime = new RuntimeConfig(config);
+  const agent = new AgentService(runtime);
 
   const backends = new BackendRegistry();
   backends.register(new ClaudeAdapter(config.pools.claude));
@@ -52,7 +55,7 @@ export async function buildServer({ config }: BuildOptions): Promise<{ app: Fast
   const idempotency = new IdempotencyStore(runtime);
   const metrics = new MetricsRegistry(backends);
 
-  const ctx: AppContext = { runtime, backends, stats, rate, idempotency, metrics };
+  const ctx: AppContext = { agent, runtime, backends, stats, rate, idempotency, metrics };
 
   const app = Fastify({
     logger: false,
@@ -88,6 +91,7 @@ export async function buildServer({ config }: BuildOptions): Promise<{ app: Fast
   await visionRoute(app, ctx);
   await completionsRoute(app, ctx);
   await imagesRoute(app, ctx);
+  await agentRoute(app, ctx);
 
   return { app, ctx };
 }

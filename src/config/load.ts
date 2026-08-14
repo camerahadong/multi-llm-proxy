@@ -9,6 +9,7 @@ export const PROJECT_ROOT = path.resolve(__dirname, '..', '..');
 export const CONFIG_FILE = path.join(PROJECT_ROOT, 'config.json');
 export const DATA_DIR = path.join(PROJECT_ROOT, 'data');
 export const GUIDE_FILE = path.join(PROJECT_ROOT, 'API_GUIDE.md');
+export const USER_GUIDE_VI_FILE = path.join(PROJECT_ROOT, 'HUONG_DAN_SU_DUNG.md');
 
 function loadEnvFile(): void {
   try {

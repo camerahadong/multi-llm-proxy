@@ -1,6 +1,6 @@
 # multi-llm-proxy
 
-OpenAI-compatible HTTP proxy unifying Claude (Anthropic OAuth Max), Codex (ChatGPT Plus OAuth), and Gemini (Google OAuth GCA) behind one endpoint.
+OpenAI-compatible HTTP proxy unifying Claude (Anthropic OAuth Max) and OpenAI models through Codex (ChatGPT Plus OAuth) behind one endpoint.
 
 Drop-in successor to `claude-app`. Same port (3456) and endpoint shape (`/v1/chat/completions`, `/v1/vision`, `/v1/models`, …) — adds:
 
@@ -12,6 +12,7 @@ Drop-in successor to `claude-app`. Same port (3456) and endpoint shape (`/v1/cha
 - **Idempotency-Key** — duplicate POSTs within 5 min return cached response
 - **Prometheus `/metrics`**
 - **Image content cache** (MD5-hash) for vision requests
+- **Interactive Codex Agent API** — persistent threads, structured events, approvals, text/image/audio input, steer and interrupt
 
 ## Quick start
 
@@ -24,7 +25,6 @@ cp config.example.json config.json
 # One-time backend logins
 claude /login
 codex login --device-auth
-gemini                  # then Google OAuth
 
 # Dev
 pnpm dev                # tsx watch
@@ -35,7 +35,13 @@ pnpm build && pnpm start:prod
 pm2 start ecosystem.config.cjs
 ```
 
-Default port `3456`. Live API guide at `GET /guide`.
+Default port `3456`.
+
+- Full API reference: `GET /guide` or `/guide?format=html`
+- Vietnamese remote-use guide: `GET /huong-dan` or `/huong-dan?format=html`
+- Source file: [`HUONG_DAN_SU_DUNG.md`](HUONG_DAN_SU_DUNG.md)
+
+The normal OpenAI-compatible endpoints remain text completion APIs. For a Codex-like client that can inspect or update an allowed workspace, use the admin-only `/v1/agent/sessions/*` API documented in `/guide` and `/huong-dan`.
 
 ## Project layout
 
@@ -43,13 +49,13 @@ Default port `3456`. Live API guide at `GET /guide`.
 src/
 ├── main.ts              # entrypoint
 ├── server.ts            # Fastify factory
+├── agent/               # Codex App Server transport + managed sessions
 ├── config/              # zod-validated config + runtime patches
 ├── backends/            # per-backend adapters + generic pool
 │   ├── pool.ts          # BackendPool<Worker> with stats
 │   ├── registry.ts      # model alias → backend routing
 │   ├── claude/          # SDK + CLI + OAuth refresh
 │   ├── codex/           # CLI + OAuth refresh
-│   └── gemini/          # CLI + OAuth refresh
 ├── routes/              # HTTP endpoints (one file per route)
 ├── middleware/          # auth, rate-limit, idempotency, cancel
 ├── adapters/            # OpenAI ↔ internal message format

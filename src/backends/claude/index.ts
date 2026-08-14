@@ -1,8 +1,9 @@
 import { logger } from '../../lib/logger.js';
 import { BackendPool, type PoolOptions } from '../pool.js';
+import { BackendQuotaError, BackendRevokedError } from '../errors.js';
 import type { BackendAdapter, CallInput, CallResult, PoolStats } from '../types.js';
 import { getClaudeAccounts, parseResetTime } from './accounts.js';
-import { callClaudeCli, isClaudeQuotaMessage } from './cli.js';
+import { callClaudeCli, isClaudeAuthMessage, isClaudeQuotaMessage } from './cli.js';
 import { refreshClaudeToken, startClaudeTokenManager } from './oauth.js';
 
 export class ClaudeAdapter implements BackendAdapter {
@@ -29,16 +30,24 @@ export class ClaudeAdapter implements BackendAdapter {
     const ready = accounts.filter((a) => a.limitedUntil <= now);
     const order = ready.length ? ready : accounts;
 
-    let lastQuota: CallResult | null = null;
+    let lastFailure: CallResult | null = null;
     for (const acc of order) {
       const result = await callClaudeCli(input, sig, acc.dir);
-      if (isClaudeQuotaMessage(result.content)) {
-        acc.limitedUntil = parseResetTime(result.content, now) ?? now + 60 * 60 * 1000;
+      const quotaFailure = isClaudeQuotaMessage(result.content);
+      const authFailure = isClaudeAuthMessage(result.content);
+      if (quotaFailure || authFailure) {
+        acc.limitedUntil = quotaFailure
+          ? parseResetTime(result.content, now) ?? now + 60 * 60 * 1000
+          : now + 15 * 60 * 1000;
         logger.warn(
-          { account: acc.label, resetAt: new Date(acc.limitedUntil).toISOString() },
-          'claude account het quota — xoay sang account khac',
+          {
+            account: acc.label,
+            reason: authFailure ? 'oauth' : 'quota',
+            retryAt: new Date(acc.limitedUntil).toISOString(),
+          },
+          'claude account unavailable — rotating account',
         );
-        lastQuota = result;
+        lastFailure = result;
         continue;
       }
       // Thanh cong: account nay OK tro lai.
@@ -48,9 +57,9 @@ export class ClaudeAdapter implements BackendAdapter {
     }
 
     // Tat ca account het quota.
-    const msg = lastQuota?.content ?? 'all claude accounts limited';
-    this.pool.markStatus('limited', msg);
-    return lastQuota ?? { content: msg, cost: 0, model: input.model, inputTokens: 0, outputTokens: 0, cacheRead: 0, cacheCreation: 0, durationMs: 0 };
+    const msg = lastFailure?.content ?? 'all claude accounts unavailable';
+    if (isClaudeAuthMessage(msg)) throw new BackendRevokedError('claude', msg);
+    throw new BackendQuotaError('claude', msg);
   }
 
   stats(): PoolStats {
@@ -68,7 +77,10 @@ export class ClaudeAdapter implements BackendAdapter {
         },
         abort.signal,
       );
-      this.pool.markStatus(isClaudeQuotaMessage(ping.content) ? 'limited' : 'ok', ping.content);
+      this.pool.markStatus(
+        isClaudeAuthMessage(ping.content) ? 'error' : isClaudeQuotaMessage(ping.content) ? 'limited' : 'ok',
+        ping.content,
+      );
     } catch (err) {
       const msg = (err as Error).message;
       this.pool.markStatus(isClaudeQuotaMessage(msg) ? 'limited' : 'error', msg);

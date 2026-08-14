@@ -1,5 +1,5 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import { isClaudeQuotaMessage } from '../backends/claude/cli.js';
+import { isClaudeAuthMessage, isClaudeQuotaMessage } from '../backends/claude/cli.js';
 import type { BackendName, CallResult } from '../backends/types.js';
 import { resolveModel } from '../backends/registry.js';
 import type { NormalisedInput } from '../adapters/openai-input.js';
@@ -79,7 +79,7 @@ export interface RouteResolution {
   routeReason: string;
 }
 
-/** Model routing shared by chat/messages: `auto`/`smart` → Sonnet, otherwise
+/** Model routing shared by chat/messages: `auto`/`smart` → latest Sonnet, otherwise
  * alias resolution via MODEL_MAP (which also picks the backend and may turn on
  * thinking via the `-thinking` suffix). */
 export function resolveRequestedModel(
@@ -93,7 +93,7 @@ export function resolveRequestedModel(
   let routeReason = '';
 
   if (model === 'auto' || model === 'smart') {
-    model = 'claude-sonnet-4-6';
+    model = 'claude-sonnet-5';
     routeReason = ' [auto]';
   } else {
     const resolved = resolveModel(model);
@@ -141,8 +141,9 @@ export async function callWithFallback(
 
   try {
     const result = await call(backendName);
-    if (backendName === 'claude' && isClaudeQuotaMessage(result.content)) {
-      logger.warn({ snippet: result.content.slice(0, 160) }, 'claude quota detected — falling back to codex');
+    if (backendName === 'claude' &&
+        (isClaudeQuotaMessage(result.content) || isClaudeAuthMessage(result.content))) {
+      logger.warn({ snippet: result.content.slice(0, 160) }, 'claude unavailable — falling back to codex');
       throw new Error(result.content);
     }
     return result;

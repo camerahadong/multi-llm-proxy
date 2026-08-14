@@ -32,6 +32,7 @@ async function main(): Promise<void> {
       // After requests drained, flush stats (in-flight calls have already
       // posted their `track()` updates).
       ctx.stats.flushSync();
+      await ctx.agent.shutdown();
       // Finally release pool workers + clear timers.
       await ctx.backends.shutdown();
     } catch (err) {

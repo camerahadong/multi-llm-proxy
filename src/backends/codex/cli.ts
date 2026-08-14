@@ -7,6 +7,26 @@ import { BackendCancelledError, BackendError, BackendTimeoutError } from '../err
 import type { CallInput, CallResult } from '../types.js';
 
 const CODEX_BIN = path.join(process.env.HOME ?? '', '.npm-global', 'bin', 'codex');
+const DEFAULT_MODEL_ALIASES = new Set(['codex', 'codex-mini', 'codex-default']);
+
+/** Build a non-interactive, read-only Codex invocation. Explicit OpenAI model
+ * IDs are forwarded to the CLI; legacy `codex*` aliases retain the account's
+ * configured default for backwards compatibility. */
+export function buildCodexArgs(input: CallInput, prompt: string): string[] {
+  const args = [
+    'exec',
+    '--ephemeral',
+    '--skip-git-repo-check',
+    '--sandbox', 'read-only',
+    '--ignore-user-config',
+    '--ignore-rules',
+    '--json',
+  ];
+  if (!DEFAULT_MODEL_ALIASES.has(input.model)) args.push('--model', input.model);
+  for (const imagePath of input.imagePaths ?? []) args.push('--image', imagePath);
+  args.push(prompt);
+  return args;
+}
 
 export function callCodexCli(input: CallInput, signal: AbortSignal): Promise<CallResult> {
   return new Promise<CallResult>((resolve, reject) => {
@@ -20,18 +40,11 @@ export function callCodexCli(input: CallInput, signal: AbortSignal): Promise<Cal
       ? fullPrompt.replace(/@\/tmp\/(?:claude-vision|gemini-work)\/[^\s]+/g, '').replace(/\n{3,}/g, '\n\n').trim()
       : fullPrompt;
 
-    // ChatGPT-account Codex rejects every `--model NAME` (gpt-5, gpt-5-codex, o3 …)
-    // with HTTP 400 "model is not supported when using Codex with a ChatGPT account".
-    // Omitting `-m` lets the CLI fall back to the account's default model, which works.
-    const args = [
-      'exec',
-      '--ephemeral',
-      '--skip-git-repo-check',
-      '--dangerously-bypass-approvals-and-sandbox',
-      '--json',
-      promptWithoutAtRefs,
-      ...imagePaths.flatMap((p) => ['-i', p]),
-    ];
+    const noToolsPrompt =
+      `${promptWithoutAtRefs}\n\n` +
+      'IMPORTANT: Do not use shell, filesystem, network, web, or other tools. Return the answer as text only.';
+    const args = buildCodexArgs(input, noToolsPrompt);
+    const startedAt = Date.now();
 
     const proc = spawn(CODEX_BIN, args, {
       timeout: timeoutMs,
@@ -44,7 +57,6 @@ export function callCodexCli(input: CallInput, signal: AbortSignal): Promise<Cal
         PATH: `${process.env.HOME}/.npm-global/bin:${process.env.PATH}`,
       },
     });
-    proc.stdin.write('\n');
     proc.stdin.end();
 
     const jsonLines: string[] = [];
@@ -113,12 +125,12 @@ export function callCodexCli(input: CallInput, signal: AbortSignal): Promise<Cal
       resolve({
         content: content ?? '',
         cost: 0,
-        model: 'codex',
+        model: DEFAULT_MODEL_ALIASES.has(input.model) ? 'codex' : input.model,
         inputTokens,
         outputTokens,
         cacheRead: 0,
         cacheCreation: 0,
-        durationMs: 0,
+        durationMs: Date.now() - startedAt,
       });
     });
 

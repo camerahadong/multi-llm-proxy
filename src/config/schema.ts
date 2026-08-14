@@ -6,6 +6,7 @@ export const apiKeyEntrySchema = z.union([
     key: z.string().min(8),
     app: z.string().optional(),
     rpm: z.number().int().positive().optional(),
+    admin: z.boolean().optional(),
   }),
 ]);
 
@@ -14,8 +15,44 @@ export const poolConfigSchema = z.object({
   maxQueue: z.number().int().min(0).max(256).default(8),
 });
 
+export const agentConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  codexCommand: z.string().min(1).max(1024).default('codex'),
+  defaultModel: z.string().min(1).max(128).default('gpt-5.6-terra'),
+  allowedModels: z.array(z.string().min(1).max(128)).min(1).max(32).default([
+    'gpt-5.6-sol',
+    'gpt-5.6-terra',
+    'gpt-5.6-luna',
+    'gpt-5.5',
+    'gpt-5.4',
+  ]),
+  defaultCwd: z.string().min(1).max(4096).default('.'),
+  allowedRoots: z.array(z.string().min(1).max(4096)).max(64).default([]),
+  writableRoots: z.array(z.string().min(1).max(4096)).max(64).default([]),
+  defaultSandbox: z.enum(['read-only', 'workspace-write']).default('read-only'),
+  allowNetwork: z.boolean().default(false),
+  maxSessions: z.number().int().min(1).max(32).default(4),
+  sessionTtlSeconds: z.number().int().min(60).max(86_400).default(3600),
+  maxEventsPerSession: z.number().int().min(100).max(10_000).default(2000),
+  rpcTimeoutSeconds: z.number().int().min(5).max(300).default(30),
+}).default({
+  enabled: false,
+  codexCommand: 'codex',
+  defaultModel: 'gpt-5.6-terra',
+  allowedModels: ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-5.4'],
+  defaultCwd: '.',
+  allowedRoots: [],
+  writableRoots: [],
+  defaultSandbox: 'read-only',
+  allowNetwork: false,
+  maxSessions: 4,
+  sessionTtlSeconds: 3600,
+  maxEventsPerSession: 2000,
+  rpcTimeoutSeconds: 30,
+});
+
 export const configSchema = z.object({
-  defaultModel: z.string().default('claude-sonnet-4-6'),
+  defaultModel: z.string().default('claude-sonnet-5'),
   timeoutSeconds: z.number().int().min(30).max(3600).default(900),
   bodyLimitMb: z.number().int().min(1).max(100).default(50),
   allowedOrigins: z.array(z.string()).default(['*']),
@@ -52,14 +89,17 @@ export const configSchema = z.object({
     })
     .default({ ttlSeconds: 600, maxEntries: 200 }),
 
+  agent: agentConfigSchema,
+
   apiKeys: z.array(apiKeyEntrySchema).default([]),
 });
 
 export type ApiKeyEntry = z.infer<typeof apiKeyEntrySchema>;
 export type PoolConfig = z.infer<typeof poolConfigSchema>;
+export type AgentConfig = z.infer<typeof agentConfigSchema>;
 export type AppConfig = z.infer<typeof configSchema>;
 
-export function normalizeApiKey(entry: ApiKeyEntry): { key: string; app: string | null; rpm: number | null } {
-  if (typeof entry === 'string') return { key: entry, app: null, rpm: null };
-  return { key: entry.key, app: entry.app ?? null, rpm: entry.rpm ?? null };
+export function normalizeApiKey(entry: ApiKeyEntry): { key: string; app: string | null; rpm: number | null; admin: boolean } {
+  if (typeof entry === 'string') return { key: entry, app: null, rpm: null, admin: false };
+  return { key: entry.key, app: entry.app ?? null, rpm: entry.rpm ?? null, admin: entry.admin === true };
 }
