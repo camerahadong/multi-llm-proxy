@@ -57,6 +57,8 @@ export const agentConfigSchema = z.object({
 
 export const configSchema = z.object({
   defaultModel: z.string().default('claude-sonnet-5-5'),
+  /** GPT model used when Claude fails (quota/auth/error). Must be a Codex model. */
+  fallbackModel: z.string().default('gpt-6-sol'),
   timeoutSeconds: z.number().int().min(30).max(3600).default(900),
   bodyLimitMb: z.number().int().min(1).max(100).default(50),
   allowedOrigins: z.array(z.string()).default(['*']),

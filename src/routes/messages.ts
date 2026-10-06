@@ -254,6 +254,7 @@ function writeAnthropicStream(reply: FastifyReply, result: CallResult, parsed: P
  * delta so pre-output errors still return a normal JSON error.
  */
 function createLiveAnthropicStream(reply: FastifyReply, model: string) {
+  // Mutable: if nothing streamed yet, finish() reports the model that answered.
   const id = `msg_${Date.now()}`;
   let started = false;
   let sent = 0;
@@ -283,6 +284,7 @@ function createLiveAnthropicStream(reply: FastifyReply, model: string) {
     get started() { return started; },
     delta(text: string) { start(); sent += text.length; textDelta(text); },
     finish(result: CallResult) {
+      if (!started) model = result.model;
       start();
       if (sent === 0 && result.content) {
         for (let i = 0; i < result.content.length; i += TEXT_CHUNK) textDelta(result.content.slice(i, i + TEXT_CHUNK));

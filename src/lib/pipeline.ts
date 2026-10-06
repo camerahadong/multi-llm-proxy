@@ -1,5 +1,5 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import { isClaudeAuthMessage, isClaudeQuotaMessage } from '../backends/claude/cli.js';
+import { isClaudeFailureResult } from '../backends/claude/cli.js';
 import type { BackendName, CallResult } from '../backends/types.js';
 import { resolveModel } from '../backends/registry.js';
 import type { NormalisedInput } from '../adapters/openai-input.js';
@@ -131,13 +131,15 @@ export async function callWithFallback(
     ? (t: string) => { emitted = true; params.onDelta!(t); }
     : undefined;
 
+  // Codex can't run Claude model ids; the fallback must use a GPT model.
+  const fallbackModel = ctx.runtime.get().fallbackModel || 'gpt-6-sol';
   const call = (target: BackendName) =>
     ctx.backends.get(target).call(
       {
         userPrompt: normalised.userPrompt,
         systemPrompt: normalised.systemPrompt || undefined,
         imagePaths: normalised.imagePaths,
-        model,
+        model: target === backendName ? model : fallbackModel,
         visionMode: normalised.imagePaths.length > 0 && target === 'claude',
         thinking,
         timeoutMs,
@@ -149,7 +151,7 @@ export async function callWithFallback(
   try {
     const result = await call(backendName);
     if (backendName === 'claude' &&
-        (isClaudeQuotaMessage(result.content) || isClaudeAuthMessage(result.content))) {
+        isClaudeFailureResult(result)) {
       logger.warn({ snippet: result.content.slice(0, 160) }, 'claude unavailable — falling back to codex');
       throw new Error(result.content);
     }
@@ -160,8 +162,9 @@ export async function callWithFallback(
     if (emitted) throw err;
     // Client cancelled mid-call: stop the fallback chain.
     if (signal.aborted) throw err;
+    logger.warn({ from: model, to: fallbackModel, err: (err as Error).message.slice(0, 160) }, 'claude failed — falling back to GPT');
     const result = await call('codex');
-    result.model = `codex:fallback-from-${model}`;
+    result.model = `${fallbackModel} (fallback-from-${model})`;
     return result;
   }
 }

@@ -18,3 +18,19 @@ describe('Claude CLI failure classification', () => {
     }, 'claude-fable-5')).toBe('claude-opus-5');
   });
 });
+
+import { isClaudeFailureResult } from '../../src/backends/claude/cli.js';
+describe('isClaudeFailureResult', () => {
+  it('ignores normal answers that talk about quota / rate limits', () => {
+    expect(isClaudeFailureResult({ content: 'Cách xử lý rate limit và quota API, resets 2 lần.', isError: false })).toBeNull();
+  });
+  it('flags CLI quota errors', () => {
+    expect(isClaudeFailureResult({ content: "You've hit your limit · resets 3am", isError: true })).toBe('quota');
+  });
+  it('flags short hard quota phrase even without the error flag', () => {
+    expect(isClaudeFailureResult({ content: "You've hit your limit · resets 3am" })).toBe('quota');
+  });
+  it('flags auth errors', () => {
+    expect(isClaudeFailureResult({ content: 'OAuth session expired. Please run /login', isError: true })).toBe('auth');
+  });
+});

@@ -103,6 +103,7 @@ export function writeChatStream(reply: FastifyReply, result: CallResult, parsed:
  * errors that happen before any output can still return a normal JSON error.
  */
 export function createLiveChatStream(reply: FastifyReply, model: string) {
+  // Mutable: if nothing streamed yet, finish() reports the model that answered (e.g. GPT fallback).
   const completionId = `chatcmpl-${Date.now()}`;
   const created = Math.floor(Date.now() / 1000);
   let started = false;
@@ -132,6 +133,7 @@ export function createLiveChatStream(reply: FastifyReply, model: string) {
     },
     /** Finish with the full result; sends any text the live path didn't (e.g. codex fallback). */
     finish(result: CallResult) {
+      if (!started) model = result.model;
       start();
       if (sent === 0 && result.content) {
         for (let i = 0; i < result.content.length; i += 20) chunk({ content: result.content.slice(i, i + 20) });

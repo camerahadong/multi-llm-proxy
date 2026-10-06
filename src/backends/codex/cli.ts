@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { writeFileSync } from 'node:fs';
+import { existsSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { killSubprocess } from '../../lib/kill-process.js';
@@ -17,7 +17,12 @@ const DEFAULT_MODEL_ALIASES = new Set(['codex', 'codex-mini', 'codex-default']);
 // schemas on every call. Text chat needs none of it, so replace the base
 // instructions and switch off the heavy built-in tools (~13.5k -> ~7k tokens).
 const LEAN_INSTRUCTIONS_FILE = path.join(tmpdir(), 'multi-llm-proxy-codex-instructions.md');
-writeFileSync(LEAN_INSTRUCTIONS_FILE, 'You are a helpful assistant. Answer the user directly as text only.\n');
+const LEAN_INSTRUCTIONS = 'You are a helpful assistant. Answer the user directly as text only.\n';
+// Re-create if a tmp cleaner removed it; a missing file would fail every GPT call.
+function ensureLeanInstructions(): void {
+  if (!existsSync(LEAN_INSTRUCTIONS_FILE)) writeFileSync(LEAN_INSTRUCTIONS_FILE, LEAN_INSTRUCTIONS);
+}
+ensureLeanInstructions();
 const LEAN_DISABLED_FEATURES = [
   'apps', 'browser_use', 'browser_use_external', 'browser_use_full_cdp_access', 'computer_use',
   'image_generation', 'multi_agent', 'plugins', 'remote_plugin', 'shell_tool', 'unified_exec',
@@ -26,6 +31,7 @@ const LEAN_DISABLED_FEATURES = [
 ];
 
 export function buildCodexArgs(input: CallInput, prompt: string): string[] {
+  ensureLeanInstructions();
   const args = [
     'exec',
     '--ephemeral',

@@ -3,7 +3,7 @@ import { BackendPool, type PoolOptions } from '../pool.js';
 import { BackendQuotaError, BackendRevokedError } from '../errors.js';
 import type { BackendAdapter, CallInput, CallResult, PoolStats } from '../types.js';
 import { getClaudeAccounts, parseResetTime } from './accounts.js';
-import { callClaudeCli, isClaudeAuthMessage, isClaudeQuotaMessage } from './cli.js';
+import { callClaudeCli, isClaudeAuthMessage, isClaudeFailureResult, isClaudeQuotaMessage } from './cli.js';
 import { refreshClaudeToken, startClaudeTokenManager } from './oauth.js';
 
 export class ClaudeAdapter implements BackendAdapter {
@@ -33,8 +33,9 @@ export class ClaudeAdapter implements BackendAdapter {
     let lastFailure: CallResult | null = null;
     for (const acc of order) {
       const result = await callClaudeCli(input, sig, acc.dir);
-      const quotaFailure = isClaudeQuotaMessage(result.content);
-      const authFailure = isClaudeAuthMessage(result.content);
+      const failure = isClaudeFailureResult(result);
+      const quotaFailure = failure === 'quota';
+      const authFailure = failure === 'auth';
       if (quotaFailure || authFailure) {
         acc.limitedUntil = quotaFailure
           ? parseResetTime(result.content, now) ?? now + 60 * 60 * 1000
@@ -78,7 +79,7 @@ export class ClaudeAdapter implements BackendAdapter {
         abort.signal,
       );
       this.pool.markStatus(
-        isClaudeAuthMessage(ping.content) ? 'error' : isClaudeQuotaMessage(ping.content) ? 'limited' : 'ok',
+        (() => { const f = isClaudeFailureResult(ping); return f === 'auth' ? 'error' : f === 'quota' ? 'limited' : 'ok'; })(),
         ping.content,
       );
     } catch (err) {

@@ -27,6 +27,25 @@ export function isClaudeQuotaMessage(content: string): boolean {
   return CLAUDE_QUOTA_PATTERNS.some((p) => text.includes(p)) || /resets?\s+\d/.test(text);
 }
 
+// Phrases only the CLI itself emits when an account is blocked.
+const CLAUDE_HARD_FAILURE_PATTERNS = ["you've hit your limit", 'you have reached your limit', 'please run /login', 'oauth session expired'];
+
+/**
+ * Is this CLI result a quota/auth failure (vs. a normal answer that merely
+ * talks about quotas)? Pattern-matching every answer misfired on articles
+ * mentioning "rate limit"/"quota": accounts got locked for an hour and the
+ * request was rerouted to GPT. Require the CLI error flag, or a short message
+ * with an unambiguous CLI phrase.
+ */
+export function isClaudeFailureResult(result: { content: string; isError?: boolean }): 'quota' | 'auth' | null {
+  const text = result.content;
+  const hard = text.length < 400 && CLAUDE_HARD_FAILURE_PATTERNS.some((p) => text.toLowerCase().includes(p));
+  if (!result.isError && !hard) return null;
+  if (isClaudeAuthMessage(text)) return 'auth';
+  if (isClaudeQuotaMessage(text)) return 'quota';
+  return null;
+}
+
 export function isClaudeAuthMessage(content: string): boolean {
   const text = content.toLowerCase();
   return CLAUDE_AUTH_PATTERNS.some((pattern) => text.includes(pattern));
@@ -96,7 +115,11 @@ export function callClaudeCli(
     if (thinking) args.push('--effort', 'high');
 
     if (visionMode) {
-      args.push('--allowedTools', 'Read');
+      // SECURITY: scope Read to the request's own temp image dirs. A bare
+      // `--allowedTools Read` let any API-key holder make the model read and
+      // print arbitrary host files (e.g. config.json with all API keys).
+      const readDirs = [...new Set(imagePaths.map((p) => path.dirname(p)))];
+      for (const dir of readDirs) args.push('--allowedTools', `Read(/${dir}/**)`);
       // The images live outside cwd (tmpdir). In headless `-p` mode, `@path`
       // mentions are NOT auto-expanded, so the model would otherwise reply
       // "no image attached". Grant Read access to each image's directory and
@@ -126,7 +149,7 @@ export function callClaudeCli(
       // Lean mode: REPLACE Claude Code's default system prompt (~20k tokens of
       // coding-agent instructions + tool schemas) and disable built-in tools.
       // Text-only chat doesn't need them; dropping them cuts input ~20k -> ~0.5k
-      // tokens per request and ~1s latency. Vision keeps the default (needs Read).
+      // tokens per request and ~1s latency. (Vision uses its own lean prompt above.)
       const leanSystem = systemPrompt && systemPrompt.trim()
         ? systemPrompt
         : 'You are a helpful assistant. Respond with text only.';
@@ -199,6 +222,17 @@ export function callClaudeCli(
       if (streaming && lineBuf) { handleLine(lineBuf); lineBuf = ''; }
       try {
         const json = streaming ? streamResult ?? {} : JSON.parse(stdout);
+        // The CLI reports API/model errors as a "successful" result with
+        // is_error=true (exit code 0). Surface them as errors so the caller can
+        // fall back — except quota/auth, which the account-rotation path
+        // detects from the content.
+        if (json.is_error && json.result !== undefined) {
+          const msg = String(json.result ?? '');
+          if (!isClaudeQuotaMessage(msg) && !isClaudeAuthMessage(msg)) {
+            reject(new BackendError(`Claude CLI error: ${msg.slice(0, 300)}`, 'claude'));
+            return;
+          }
+        }
         if (json.result !== undefined) {
           resolve({
             content: String(json.result ?? ''),
@@ -209,6 +243,7 @@ export function callClaudeCli(
             cacheRead: json.usage?.cache_read_input_tokens ?? 0,
             cacheCreation: json.usage?.cache_creation_input_tokens ?? 0,
             durationMs: json.duration_ms ?? 0,
+            isError: !!json.is_error,
           });
           return;
         }

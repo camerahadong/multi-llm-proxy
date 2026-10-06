@@ -24,6 +24,8 @@ export interface CallResult {
   cacheRead: number;
   cacheCreation: number;
   durationMs: number;
+  /** CLI flagged this result as an error (quota/auth/API). Normal answers: false. */
+  isError?: boolean;
 }
 
 export interface PoolStats {
