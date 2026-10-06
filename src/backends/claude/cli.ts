@@ -114,7 +114,14 @@ export function callClaudeCli(
           `Treat the file contents as the image(s) the user is asking about. Do not claim no image was attached.`;
         visionSystem = visionSystem ? `${visionSystem}\n\n${directive}` : directive;
       }
-      if (visionSystem) args.push('--append-system-prompt', visionSystem);
+      // Lean vision: replace the default Claude Code prompt (~30k tokens) and
+      // expose only the Read tool needed to load the images. ~35k -> ~4k tokens.
+      args.push(
+        '--system-prompt',
+        visionSystem || 'You are a helpful assistant.',
+        '--tools', 'Read',
+        '--strict-mcp-config',
+      );
     } else {
       // Lean mode: REPLACE Claude Code's default system prompt (~20k tokens of
       // coding-agent instructions + tool schemas) and disable built-in tools.

@@ -22,5 +22,7 @@ describe('Codex CLI invocation', () => {
   it('passes images through the native image flag', () => {
     const call = { ...input('gpt-5.6-sol'), imagePaths: ['/tmp/example.png'] };
     expect(buildCodexArgs(call, 'describe')).toEqual(expect.arrayContaining(['--image', '/tmp/example.png']));
+    // Prompt must follow `--` so the variadic --image flag cannot swallow it.
+    expect(buildCodexArgs(call, 'describe').slice(-2)).toEqual(['--', 'describe']);
   });
 });

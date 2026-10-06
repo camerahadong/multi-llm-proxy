@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { killSubprocess } from '../../lib/kill-process.js';
@@ -12,6 +13,18 @@ const DEFAULT_MODEL_ALIASES = new Set(['codex', 'codex-mini', 'codex-default']);
 /** Build a non-interactive, read-only Codex invocation. Explicit OpenAI model
  * IDs are forwarded to the CLI; legacy `codex*` aliases retain the account's
  * configured default for backwards compatibility. */
+// Lean mode: Codex ships ~13.5k tokens of coding-agent instructions + tool
+// schemas on every call. Text chat needs none of it, so replace the base
+// instructions and switch off the heavy built-in tools (~13.5k -> ~7k tokens).
+const LEAN_INSTRUCTIONS_FILE = path.join(tmpdir(), 'multi-llm-proxy-codex-instructions.md');
+writeFileSync(LEAN_INSTRUCTIONS_FILE, 'You are a helpful assistant. Answer the user directly as text only.\n');
+const LEAN_DISABLED_FEATURES = [
+  'apps', 'browser_use', 'browser_use_external', 'browser_use_full_cdp_access', 'computer_use',
+  'image_generation', 'multi_agent', 'plugins', 'remote_plugin', 'shell_tool', 'unified_exec',
+  'skill_search', 'tool_suggest', 'goals', 'sleep_tool', 'in_app_browser', 'code_mode_host',
+  'workspace_dependencies', 'worktrees',
+];
+
 export function buildCodexArgs(input: CallInput, prompt: string): string[] {
   const args = [
     'exec',
@@ -21,10 +34,15 @@ export function buildCodexArgs(input: CallInput, prompt: string): string[] {
     '--ignore-user-config',
     '--ignore-rules',
     '--json',
+    '-c', `model_instructions_file=${JSON.stringify(LEAN_INSTRUCTIONS_FILE)}`,
+    '-c', 'tools.web_search=false',
   ];
+  for (const f of LEAN_DISABLED_FEATURES) args.push('--disable', f);
   if (!DEFAULT_MODEL_ALIASES.has(input.model)) args.push('--model', input.model);
   for (const imagePath of input.imagePaths ?? []) args.push('--image', imagePath);
-  args.push(prompt);
+  // `--image <FILE>...` is variadic: without `--` it swallows the prompt as
+  // another image path and Codex fails with "No prompt provided".
+  args.push('--', prompt);
   return args;
 }
 
