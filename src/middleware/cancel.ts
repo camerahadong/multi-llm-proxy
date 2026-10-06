@@ -30,7 +30,12 @@ export function bindCancelController(req: FastifyRequest, reply: FastifyReply): 
     socket.removeListener('close', onSocketClose);
   };
   reply.raw.once('finish', cleanup);
-  reply.raw.once('close', cleanup);
+  // 'close' before 'finish' means the client went away mid-response (e.g. a
+  // live SSE stream). Abort so the backend CLI process is killed, not orphaned.
+  reply.raw.once('close', () => {
+    if (!reply.raw.writableFinished && !controller.signal.aborted) controller.abort();
+    cleanup();
+  });
 
   return controller;
 }

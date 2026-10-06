@@ -93,7 +93,7 @@ export function resolveRequestedModel(
   let routeReason = '';
 
   if (model === 'auto' || model === 'smart') {
-    model = 'claude-sonnet-5';
+    model = 'claude-sonnet-5-5';
     routeReason = ' [auto]';
   } else {
     const resolved = resolveModel(model);
@@ -121,9 +121,15 @@ export async function callWithFallback(
     thinking: boolean;
     timeoutMs: number;
     signal: AbortSignal;
+    /** Live text deltas; only the primary claude attempt streams. */
+    onDelta?: (text: string) => void;
   },
 ): Promise<CallResult> {
   const { normalised, model, backendName, thinking, timeoutMs, signal } = params;
+  let emitted = false;
+  const onDelta = params.onDelta
+    ? (t: string) => { emitted = true; params.onDelta!(t); }
+    : undefined;
 
   const call = (target: BackendName) =>
     ctx.backends.get(target).call(
@@ -135,6 +141,7 @@ export async function callWithFallback(
         visionMode: normalised.imagePaths.length > 0 && target === 'claude',
         thinking,
         timeoutMs,
+        ...(target === 'claude' && onDelta ? { onDelta } : {}),
       },
       signal,
     );
@@ -149,6 +156,8 @@ export async function callWithFallback(
     return result;
   } catch (err) {
     if (backendName !== 'claude') throw err;
+    // Already streamed text to the client: falling back would duplicate output.
+    if (emitted) throw err;
     // Client cancelled mid-call: stop the fallback chain.
     if (signal.aborted) throw err;
     const result = await call('codex');

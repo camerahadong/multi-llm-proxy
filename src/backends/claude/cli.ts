@@ -73,7 +73,9 @@ export function callClaudeCli(
   configDir?: string,
 ): Promise<CallResult> {
   return new Promise<CallResult>((resolve, reject) => {
-    const { userPrompt, systemPrompt, model, visionMode, thinking, timeoutMs } = input;
+    const { userPrompt, systemPrompt, model, visionMode, thinking, timeoutMs, onDelta } = input;
+    // Real streaming: only for text mode (vision needs multi-turn Read).
+    const streaming = !!onDelta && !visionMode;
     const imagePaths = input.imagePaths ?? [];
     // Vision needs one Read turn per image plus a turn to answer. Give a little
     // headroom so multi-image montages don't run out of turns mid-read.
@@ -81,7 +83,8 @@ export function callClaudeCli(
 
     const args = [
       '-p', userPrompt,
-      '--output-format', 'json',
+      '--output-format', streaming ? 'stream-json' : 'json',
+      ...(streaming ? ['--verbose', '--include-partial-messages'] : []),
       '--max-turns', String(effectiveMaxTurns),
       '--model', model,
       // No user/project settings: keeps hooks/plugins (e.g. statusline banners)
@@ -89,7 +92,8 @@ export function callClaudeCli(
       '--setting-sources', '',
     ];
 
-    if (thinking) args.push('--think');
+    // CLI removed --think; extended thinking is now driven by effort level.
+    if (thinking) args.push('--effort', 'high');
 
     if (visionMode) {
       args.push('--allowedTools', 'Read');
@@ -112,9 +116,14 @@ export function callClaudeCli(
       }
       if (visionSystem) args.push('--append-system-prompt', visionSystem);
     } else {
-      const noTools =
-        '\n\nIMPORTANT: Do NOT use any built-in tools (WebSearch, WebFetch, Read, Edit, Bash, etc). Respond with text only.';
-      args.push('--append-system-prompt', (systemPrompt ?? '') + noTools);
+      // Lean mode: REPLACE Claude Code's default system prompt (~20k tokens of
+      // coding-agent instructions + tool schemas) and disable built-in tools.
+      // Text-only chat doesn't need them; dropping them cuts input ~20k -> ~0.5k
+      // tokens per request and ~1s latency. Vision keeps the default (needs Read).
+      const leanSystem = systemPrompt && systemPrompt.trim()
+        ? systemPrompt
+        : 'You are a helpful assistant. Respond with text only.';
+      args.push('--system-prompt', leanSystem, '--tools', '', '--strict-mcp-config');
     }
 
     const proc = spawn('claude', args, {
@@ -134,8 +143,34 @@ export function callClaudeCli(
     let stdout = '';
     let stderr = '';
     let settled = false;
+    // stream-json: one JSON event per line. Forward model text deltas live and
+    // keep the final `result` event (same shape as --output-format json).
+    let lineBuf = '';
+    let streamResult: any = null;
+    const handleLine = (line: string) => {
+      if (!line.trim()) return;
+      let ev: any;
+      try { ev = JSON.parse(line); } catch { return; }
+      if (ev.type === 'result') { streamResult = ev; return; }
+      const d = ev.type === 'stream_event' ? ev.event?.delta : null;
+      if (d?.type === 'text_delta' && typeof d.text === 'string' && d.text) {
+        try { onDelta!(d.text); } catch { /* client gone */ }
+      }
+    };
+    // Decode as a UTF-8 stream: a multi-byte char (Vietnamese) split across
+    // two chunks would otherwise turn into U+FFFD garbage.
+    proc.stdout.setEncoding('utf8');
+    proc.stderr.setEncoding('utf8');
     proc.stdout.on('data', (d) => {
-      stdout += d.toString();
+      const s = d.toString();
+      stdout += s;
+      if (!streaming) return;
+      lineBuf += s;
+      let nl: number;
+      while ((nl = lineBuf.indexOf('\n')) >= 0) {
+        handleLine(lineBuf.slice(0, nl));
+        lineBuf = lineBuf.slice(nl + 1);
+      }
     });
     proc.stderr.on('data', (d) => {
       stderr += d.toString();
@@ -154,8 +189,9 @@ export function callClaudeCli(
       if (settled) return;
       settled = true;
 
+      if (streaming && lineBuf) { handleLine(lineBuf); lineBuf = ''; }
       try {
-        const json = JSON.parse(stdout);
+        const json = streaming ? streamResult ?? {} : JSON.parse(stdout);
         if (json.result !== undefined) {
           resolve({
             content: String(json.result ?? ''),

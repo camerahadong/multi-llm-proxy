@@ -10,3 +10,4 @@ API_GUIDE.md
 config.json.bak.*
 *.bak
 *.bak.*
+config.json.bak*

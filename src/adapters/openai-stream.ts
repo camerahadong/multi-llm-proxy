@@ -97,3 +97,60 @@ export function writeChatStream(reply: FastifyReply, result: CallResult, parsed:
   reply.raw.write('data: [DONE]\n\n');
   reply.raw.end();
 }
+
+/**
+ * Live SSE writer: headers + role chunk are sent lazily on the first delta, so
+ * errors that happen before any output can still return a normal JSON error.
+ */
+export function createLiveChatStream(reply: FastifyReply, model: string) {
+  const completionId = `chatcmpl-${Date.now()}`;
+  const created = Math.floor(Date.now() / 1000);
+  let started = false;
+  let sent = 0;
+  const write = (obj: unknown) => {
+    if (!reply.raw.writableEnded) reply.raw.write(`data: ${JSON.stringify(obj)}\n\n`);
+  };
+  const chunk = (delta: Record<string, unknown>, finish: string | null = null, extra: Record<string, unknown> = {}) =>
+    write({ id: completionId, object: 'chat.completion.chunk', created, model, choices: [{ index: 0, delta, finish_reason: finish }], ...extra });
+  const start = () => {
+    if (started) return;
+    started = true;
+    reply.raw.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+    chunk({ role: 'assistant', content: '' });
+  };
+  return {
+    get started() { return started; },
+    delta(text: string) {
+      start();
+      sent += text.length;
+      chunk({ content: text });
+    },
+    /** Finish with the full result; sends any text the live path didn't (e.g. codex fallback). */
+    finish(result: CallResult) {
+      start();
+      if (sent === 0 && result.content) {
+        for (let i = 0; i < result.content.length; i += 20) chunk({ content: result.content.slice(i, i + 20) });
+      }
+      chunk({}, 'stop', {
+        usage: {
+          prompt_tokens: result.inputTokens,
+          completion_tokens: result.outputTokens,
+          total_tokens: result.inputTokens + result.outputTokens,
+        },
+      });
+      if (!reply.raw.writableEnded) reply.raw.write('data: [DONE]\n\n');
+      reply.raw.end();
+    },
+    fail(message: string) {
+      start();
+      write({ error: { message, type: 'server_error' } });
+      reply.raw.write('data: [DONE]\n\n');
+      reply.raw.end();
+    },
+  };
+}

@@ -249,6 +249,61 @@ function writeAnthropicStream(reply: FastifyReply, result: CallResult, parsed: P
   reply.raw.end();
 }
 
+/**
+ * Live Anthropic SSE: message_start + text block are sent lazily on the first
+ * delta so pre-output errors still return a normal JSON error.
+ */
+function createLiveAnthropicStream(reply: FastifyReply, model: string) {
+  const id = `msg_${Date.now()}`;
+  let started = false;
+  let sent = 0;
+  const send = (event: string, data: unknown): void => {
+    if (!reply.raw.writableEnded) reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  };
+  const start = () => {
+    if (started) return;
+    started = true;
+    reply.raw.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+    send('message_start', {
+      type: 'message_start',
+      message: { id, type: 'message', role: 'assistant', model, content: [], stop_reason: null, stop_sequence: null,
+        usage: { input_tokens: 0, output_tokens: 0 } },
+    });
+    send('content_block_start', { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } });
+    send('ping', { type: 'ping' });
+  };
+  const textDelta = (text: string) =>
+    send('content_block_delta', { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } });
+  return {
+    get started() { return started; },
+    delta(text: string) { start(); sent += text.length; textDelta(text); },
+    finish(result: CallResult) {
+      start();
+      if (sent === 0 && result.content) {
+        for (let i = 0; i < result.content.length; i += TEXT_CHUNK) textDelta(result.content.slice(i, i + TEXT_CHUNK));
+      }
+      send('content_block_stop', { type: 'content_block_stop', index: 0 });
+      send('message_delta', {
+        type: 'message_delta',
+        delta: { stop_reason: 'end_turn', stop_sequence: null },
+        usage: { input_tokens: result.inputTokens, output_tokens: result.outputTokens },
+      });
+      send('message_stop', { type: 'message_stop' });
+      reply.raw.end();
+    },
+    fail(message: string) {
+      start();
+      send('error', { type: 'error', error: { type: 'api_error', message } });
+      reply.raw.end();
+    },
+  };
+}
+
 export async function messagesRoute(app: FastifyInstance, ctx: AppContext): Promise<void> {
   // Rough token estimate so Anthropic clients that pre-flight `count_tokens` don't 404.
   app.post('/v1/messages/count_tokens', async (req: FastifyRequest, reply: FastifyReply) => {
@@ -290,6 +345,7 @@ export async function messagesRoute(app: FastifyInstance, ctx: AppContext): Prom
     const timeoutMs = cfg.timeoutSeconds * 1000;
 
     let normalised: NormalisedInput | undefined;
+    let live: ReturnType<typeof createLiveAnthropicStream> | null = null;
     try {
       const system = systemToString(body.system);
       const oaMessages = toOpenAiMessages(system, body.messages ?? []);
@@ -310,6 +366,8 @@ export async function messagesRoute(app: FastifyInstance, ctx: AppContext): Prom
       );
       ctx.metrics.backendQueueDepth.observe({ backend: backendName }, ctx.backends.get(backendName).stats().queueDepth);
 
+      // Real streaming for plain text; tool_use blocks need the full text.
+      live = wantStream && !hasTools ? createLiveAnthropicStream(reply, model) : null;
       const result = await callWithFallback(ctx, {
         normalised,
         model,
@@ -317,6 +375,7 @@ export async function messagesRoute(app: FastifyInstance, ctx: AppContext): Prom
         thinking: route.thinking,
         timeoutMs,
         signal: controller.signal,
+        ...(live ? { onDelta: (t: string) => live!.delta(t) } : {}),
       });
 
       const elapsed = Date.now() - start;
@@ -325,6 +384,10 @@ export async function messagesRoute(app: FastifyInstance, ctx: AppContext): Prom
         : { isToolCall: false, toolCalls: null, textContent: result.content };
       recordOutcome(ctx, req, { appName, backendName, model, elapsed, success: true, result });
 
+      if (live) {
+        live.finish(result);
+        return reply;
+      }
       if (wantStream) {
         writeAnthropicStream(reply, result, parsed);
         return reply;
@@ -337,6 +400,11 @@ export async function messagesRoute(app: FastifyInstance, ctx: AppContext): Prom
       const elapsed = Date.now() - start;
       recordOutcome(ctx, req, { appName, backendName, model, elapsed, success: false });
 
+      if (live?.started) {
+        logger.error({ err: (err as Error).message, app: appName }, 'messages stream error');
+        live.fail(publicErrorMessage(err));
+        return reply;
+      }
       if (err instanceof BackendBusyError) {
         ctx.metrics.backendBusyTotal.inc({ backend: err.backend });
         reply.code(429).header('Retry-After', String(err.retryAfterSec));

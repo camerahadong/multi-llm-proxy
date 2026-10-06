@@ -9,8 +9,8 @@ function recommendedModel(ctx: AppContext): string {
   const claude = ctx.backends.get('claude').stats();
   const codex = ctx.backends.get('codex').stats();
   if (claude.status === 'limited' || claude.status === 'error') {
-    if (codex.status !== 'error') return 'gpt-5.6-terra';
-    return 'claude-sonnet-5';
+    if (codex.status !== 'error') return 'gpt-6-luna';
+    return 'claude-sonnet-5-5';
   }
   return 'auto';
 }

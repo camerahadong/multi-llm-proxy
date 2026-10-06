@@ -20,6 +20,10 @@ export const agentConfigSchema = z.object({
   codexCommand: z.string().min(1).max(1024).default('codex'),
   defaultModel: z.string().min(1).max(128).default('gpt-5.6-terra'),
   allowedModels: z.array(z.string().min(1).max(128)).min(1).max(32).default([
+    'gpt-6.1-sol',
+    'gpt-6-astra',
+    'gpt-6-sol',
+    'gpt-6-luna',
     'gpt-5.6-sol',
     'gpt-5.6-terra',
     'gpt-5.6-luna',
@@ -52,7 +56,7 @@ export const agentConfigSchema = z.object({
 });
 
 export const configSchema = z.object({
-  defaultModel: z.string().default('claude-sonnet-5'),
+  defaultModel: z.string().default('claude-sonnet-5-5'),
   timeoutSeconds: z.number().int().min(30).max(3600).default(900),
   bodyLimitMb: z.number().int().min(1).max(100).default(50),
   allowedOrigins: z.array(z.string()).default(['*']),

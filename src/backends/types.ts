@@ -11,6 +11,8 @@ export interface CallInput {
   /** Enable Claude `--think` flag. */
   thinking?: boolean;
   timeoutMs: number;
+  /** Real-time text deltas (claude text mode only). Called as the model writes. */
+  onDelta?: (text: string) => void;
 }
 
 export interface CallResult {

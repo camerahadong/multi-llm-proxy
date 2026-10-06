@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { BackendBusyError, publicErrorMessage } from '../backends/errors.js';
 import { normaliseOpenAiMessages, type NormalisedInput, type OpenAiMessage } from '../adapters/openai-input.js';
 import { buildChatResponse } from '../adapters/openai-output.js';
-import { writeChatStream } from '../adapters/openai-stream.js';
+import { createLiveChatStream, writeChatStream } from '../adapters/openai-stream.js';
 import { buildToolSystemPrompt, parseToolCalls, type ToolChoice, type ToolDefinition } from '../adapters/tool-calls.js';
 import { cleanupTempFiles } from '../lib/image-store.js';
 import { logger } from '../lib/logger.js';
@@ -52,6 +52,7 @@ export async function chatRoute(app: FastifyInstance, ctx: AppContext): Promise<
     const timeoutMs = (body.timeout ?? cfg.timeoutSeconds) * 1000;
 
     let normalised: NormalisedInput | undefined;
+    let live: ReturnType<typeof createLiveChatStream> | null = null;
     try {
       normalised = await normaliseOpenAiMessages(body.messages ?? [], toolPrompt);
 
@@ -70,6 +71,9 @@ export async function chatRoute(app: FastifyInstance, ctx: AppContext): Promise<
       );
       ctx.metrics.backendQueueDepth.observe({ backend: backendName }, ctx.backends.get(backendName).stats().queueDepth);
 
+      // Real streaming for plain text answers. Tool calls still need the full
+      // text to parse, so they keep the buffered path.
+      live = wantStream && !hasTools ? createLiveChatStream(reply, model) : null;
       const result = await callWithFallback(ctx, {
         normalised,
         model,
@@ -77,12 +81,17 @@ export async function chatRoute(app: FastifyInstance, ctx: AppContext): Promise<
         thinking: route.thinking,
         timeoutMs,
         signal: controller.signal,
+        ...(live ? { onDelta: (t: string) => live!.delta(t) } : {}),
       });
 
       const elapsed = Date.now() - start;
       const parsed = hasTools ? parseToolCalls(result.content) : { isToolCall: false, toolCalls: null, textContent: result.content };
       recordOutcome(ctx, req, { appName, backendName, model, elapsed, success: true, result });
 
+      if (live) {
+        live.finish(result);
+        return reply;
+      }
       if (wantStream) {
         writeChatStream(reply, result, parsed);
         return reply;
@@ -95,6 +104,11 @@ export async function chatRoute(app: FastifyInstance, ctx: AppContext): Promise<
       const elapsed = Date.now() - start;
       recordOutcome(ctx, req, { appName, backendName, model, elapsed, success: false });
 
+      if (live?.started) {
+        logger.error({ err: (err as Error).message, app: appName }, 'chat stream error');
+        live.fail(publicErrorMessage(err));
+        return reply;
+      }
       if (err instanceof BackendBusyError) {
         ctx.metrics.backendBusyTotal.inc({ backend: err.backend });
         reply.code(429).header('Retry-After', String(err.retryAfterSec));

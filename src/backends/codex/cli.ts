@@ -63,6 +63,10 @@ export function callCodexCli(input: CallInput, signal: AbortSignal): Promise<Cal
     let stderr = '';
     let settled = false;
 
+    // Decode as a UTF-8 stream: a multi-byte char (Vietnamese) split across
+    // two chunks would otherwise turn into U+FFFD garbage.
+    proc.stdout.setEncoding('utf8');
+    proc.stderr.setEncoding('utf8');
     proc.stdout.on('data', (d) => {
       jsonLines.push(...d.toString().split('\n').filter((l: string) => l.trim()));
     });
