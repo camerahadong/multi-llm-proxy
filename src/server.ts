@@ -12,6 +12,7 @@ import { configureImageCache, startVisionDirSweeper } from './lib/image-store.js
 import { logger } from './lib/logger.js';
 import { MetricsRegistry } from './lib/metrics.js';
 import { StatsStore } from './lib/stats-store.js';
+import { registerGeoBlock } from './middleware/geo-block.js';
 import { IdempotencyStore } from './middleware/idempotency.js';
 import { RateLimiter } from './middleware/rate-limit.js';
 import { chatRoute } from './routes/chat.js';
@@ -77,6 +78,7 @@ export async function buildServer({ config }: BuildOptions): Promise<{ app: Fast
     allowedHeaders: ['Content-Type', 'Authorization', 'X-App-Name', 'Idempotency-Key', 'x-api-key', 'anthropic-version', 'anthropic-beta'],
   });
   await app.register(sensible);
+  registerGeoBlock(app, runtime, stats);
 
   await modelsRoute(app);
   await healthRoute(app, ctx);

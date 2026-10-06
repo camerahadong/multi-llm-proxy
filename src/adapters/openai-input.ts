@@ -1,4 +1,4 @@
-import { fetchImageToTmp, saveBase64Image } from '../lib/image-store.js';
+import { cleanupTempFiles, fetchImageToTmp, ImageInputError, saveBase64Image } from '../lib/image-store.js';
 import { logger } from '../lib/logger.js';
 
 export interface OpenAiMessage {
@@ -35,6 +35,7 @@ async function extractContent(content: unknown, imagePaths: string[]): Promise<s
         pieces.push(`@${p}`);
       } catch (err) {
         logger.warn({ err: (err as Error).message }, 'failed to save image_url');
+        throw imageError(err, imagePaths.length + 1);
       }
       continue;
     }
@@ -50,10 +51,17 @@ async function extractContent(content: unknown, imagePaths: string[]): Promise<s
         }
       } catch (err) {
         logger.warn({ err: (err as Error).message }, 'failed to save image block');
+        throw imageError(err, imagePaths.length + 1);
       }
     }
   }
   return pieces.join('\n');
+}
+
+/** Wrap any image failure as a 400-worthy ImageInputError naming which image. */
+function imageError(err: unknown, index: number): ImageInputError {
+  const reason = err instanceof ImageInputError ? err.message : 'không xử lý được ảnh';
+  return new ImageInputError(`Ảnh thứ ${index}: ${reason}`);
 }
 
 export async function normaliseOpenAiMessages(
@@ -61,6 +69,20 @@ export async function normaliseOpenAiMessages(
   toolSystemPrompt: string,
 ): Promise<NormalisedInput> {
   const imagePaths: string[] = [];
+  try {
+    return await normaliseInto(messages, toolSystemPrompt, imagePaths);
+  } catch (err) {
+    // Don't leak temp files for the images that were saved before the failure.
+    cleanupTempFiles(imagePaths);
+    throw err;
+  }
+}
+
+async function normaliseInto(
+  messages: OpenAiMessage[],
+  toolSystemPrompt: string,
+  imagePaths: string[],
+): Promise<NormalisedInput> {
   const systemParts: string[] = [];
   for (const m of messages.filter((m) => m.role === 'system')) {
     systemParts.push(await extractContent(m.content, imagePaths));

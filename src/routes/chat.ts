@@ -4,7 +4,7 @@ import { normaliseOpenAiMessages, type NormalisedInput, type OpenAiMessage } fro
 import { buildChatResponse } from '../adapters/openai-output.js';
 import { createLiveChatStream, writeChatStream } from '../adapters/openai-stream.js';
 import { buildToolSystemPrompt, parseToolCalls, type ToolChoice, type ToolDefinition } from '../adapters/tool-calls.js';
-import { cleanupTempFiles } from '../lib/image-store.js';
+import { cleanupTempFiles, ImageInputError } from '../lib/image-store.js';
 import { logger } from '../lib/logger.js';
 import { callWithFallback, guardRequest, recordOutcome, resolveRequestedModel } from '../lib/pipeline.js';
 import { bindCancelController } from '../middleware/cancel.js';
@@ -101,6 +101,10 @@ export async function chatRoute(app: FastifyInstance, ctx: AppContext): Promise<
       if (idemKey) ctx.idempotency.set(idemKey, '/v1/chat/completions', req.body, { status: 200, body: response });
       return response;
     } catch (err) {
+      if (err instanceof ImageInputError) {
+        reply.code(400);
+        return { error: { message: err.message, type: 'invalid_request_error', code: 'invalid_image' } };
+      }
       const elapsed = Date.now() - start;
       recordOutcome(ctx, req, { appName, backendName, model, elapsed, success: false });
 

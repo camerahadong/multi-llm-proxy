@@ -9,7 +9,7 @@ import {
   type ToolDefinition,
 } from '../adapters/tool-calls.js';
 import type { CallResult } from '../backends/types.js';
-import { cleanupTempFiles } from '../lib/image-store.js';
+import { cleanupTempFiles, ImageInputError } from '../lib/image-store.js';
 import { logger } from '../lib/logger.js';
 import { callWithFallback, guardRequest, recordOutcome, resolveRequestedModel } from '../lib/pipeline.js';
 import { bindCancelController } from '../middleware/cancel.js';
@@ -399,6 +399,10 @@ export async function messagesRoute(app: FastifyInstance, ctx: AppContext): Prom
       if (idemKey) ctx.idempotency.set(idemKey, '/v1/messages', req.body, { status: 200, body: response });
       return response;
     } catch (err) {
+      if (err instanceof ImageInputError) {
+        reply.code(400);
+        return { type: 'error', error: { type: 'invalid_request_error', message: err.message } };
+      }
       const elapsed = Date.now() - start;
       recordOutcome(ctx, req, { appName, backendName, model, elapsed, success: false });
 

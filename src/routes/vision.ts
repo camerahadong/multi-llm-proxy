@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { BackendBusyError, publicErrorMessage } from '../backends/errors.js';
 import { resolveModel } from '../backends/registry.js';
 
-import { cleanupTempFiles, fetchImageToTmp, saveBase64Image } from '../lib/image-store.js';
+import { cleanupTempFiles, fetchImageToTmp, ImageInputError, saveBase64Image } from '../lib/image-store.js';
 import { logger } from '../lib/logger.js';
 import { guardRequest, recordOutcome } from '../lib/pipeline.js';
 import { bindCancelController } from '../middleware/cancel.js';
@@ -49,8 +49,11 @@ async function runVision(
   const start = Date.now();
   try {
     for (const it of inputs) {
-      const p = it.url ? await fetchImageToTmp(it.url) : saveBase64Image(it.data!, it.mime);
-      tmpPaths.push(p);
+      try {
+        tmpPaths.push(it.url ? await fetchImageToTmp(it.url) : saveBase64Image(it.data!, it.mime));
+      } catch (err) {
+        throw new ImageInputError(`Ảnh thứ ${tmpPaths.length + 1}: ${err instanceof ImageInputError ? err.message : 'không xử lý được ảnh'}`);
+      }
     }
 
     const cfg = ctx.runtime.get();
@@ -113,6 +116,10 @@ async function runVision(
       cost_usd: result.cost,
     };
   } catch (err) {
+    if (err instanceof ImageInputError) {
+      reply.code(400);
+      return { error: { message: err.message, type: 'invalid_request_error', code: 'invalid_image' } };
+    }
     recordOutcome(ctx, req, {
       appName,
       backendName: resolved.backend,

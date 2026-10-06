@@ -9,6 +9,14 @@ const VISION_TMP_DIR = '/tmp/claude-vision';
 mkdirSync(VISION_TMP_DIR, { recursive: true });
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+
+/** A client-side problem with an attached image → HTTP 400 with a clear reason. */
+export class ImageInputError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ImageInputError';
+  }
+}
 const MIME_TO_EXT: Record<string, string> = {
   'image/jpeg': 'jpg',
   'image/jpg': 'jpg',
@@ -50,10 +58,10 @@ function sniffImageMime(buf: Buffer): string | null {
  */
 function writeImage(buf: Buffer, _mimeHint: string): string {
   if (buf.length > MAX_IMAGE_BYTES) {
-    throw new Error(`image too large (${buf.length} bytes, max ${MAX_IMAGE_BYTES})`);
+    throw new ImageInputError(`ảnh quá lớn (${(buf.length / 1048576).toFixed(1)} MB, tối đa ${MAX_IMAGE_BYTES / 1048576} MB)`);
   }
   const mime = sniffImageMime(buf);
-  if (!mime) throw new Error('unsupported image format (expected PNG, JPEG, GIF or WebP)');
+  if (!mime) throw new ImageInputError('dữ liệu không phải ảnh hợp lệ (chỉ nhận PNG, JPEG, GIF, WebP)');
   const dir = mkdtempSync(path.join(VISION_TMP_DIR, 'req-'));
   const fp = path.join(dir, `${randomUUID()}.${pickExt(mime)}`);
   writeFileSync(fp, buf, { mode: 0o600 });
@@ -94,15 +102,30 @@ const MAX_FETCH_BYTES = MAX_IMAGE_BYTES;
  */
 export async function fetchImageToTmp(url: string): Promise<string> {
   let u: URL;
-  try { u = new URL(url); } catch { throw new Error('invalid image url'); }
-  if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new Error('image url must be http(s)');
+  try { u = new URL(url); } catch { throw new ImageInputError('link ảnh không hợp lệ'); }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new ImageInputError('link ảnh phải là http:// hoặc https://');
   const host = u.hostname.replace(/^\[|\]$/g, '');
-  const addrs = net.isIP(host) ? [host] : (await lookup(host, { all: true })).map((a) => a.address);
-  if (addrs.length === 0 || addrs.some(isPrivateAddress)) throw new Error('image url host is not allowed');
-  const resp = await fetch(u, { signal: AbortSignal.timeout(20_000), redirect: 'error' });
-  if (!resp.ok) throw new Error(`fetch image failed: HTTP ${resp.status}`);
+  let addrs: string[];
+  try {
+    addrs = net.isIP(host) ? [host] : (await lookup(host, { all: true })).map((a) => a.address);
+  } catch {
+    throw new ImageInputError(`không tìm thấy tên miền của link ảnh (${host})`);
+  }
+  if (addrs.length === 0 || addrs.some(isPrivateAddress)) {
+    throw new ImageInputError('link ảnh trỏ tới địa chỉ nội bộ / mạng riêng, không được phép (vì lý do bảo mật)');
+  }
+  let resp: Response;
+  try {
+    resp = await fetch(u, { signal: AbortSignal.timeout(20_000), redirect: 'error' });
+  } catch (err) {
+    const msg = (err as Error).message ?? '';
+    throw new ImageInputError(/redirect/i.test(msg)
+      ? 'link ảnh bị chuyển hướng (redirect) — hãy dùng link trực tiếp tới file ảnh'
+      : 'không tải được link ảnh (hết thời gian hoặc lỗi mạng)');
+  }
+  if (!resp.ok) throw new ImageInputError(`không tải được link ảnh (HTTP ${resp.status})`);
   const len = Number(resp.headers.get('content-length') ?? 0);
-  if (len > MAX_FETCH_BYTES) throw new Error('image too large');
+  if (len > MAX_FETCH_BYTES) throw new ImageInputError(`ảnh quá lớn (tối đa ${MAX_FETCH_BYTES / 1048576} MB)`);
   const buf = Buffer.from(await resp.arrayBuffer());
   return writeImage(buf, (resp.headers.get('content-type') ?? '').split(';')[0]);
 }

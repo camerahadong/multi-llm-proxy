@@ -7,7 +7,7 @@ const PNG = Buffer.from('89504e470d0a1a0a0000000d4948445200000001000000010806000
 
 describe('image-store', () => {
   it('rejects non-image bytes (e.g. JSON smuggled as an "image")', () => {
-    expect(() => saveBase64Image(Buffer.from('{"apiKeys":[]}').toString('base64'))).toThrow(/unsupported image/);
+    expect(() => saveBase64Image(Buffer.from('{"apiKeys":[]}').toString('base64'))).toThrow(/không phải ảnh/);
   });
 
   it('stores each image in its own random dir and cleans the dir up', () => {
@@ -30,6 +30,6 @@ describe('image-store', () => {
 
   it('blocks SSRF to the proxy itself and to LAN / metadata hosts', async () => {
     for (const u of ['http://127.0.0.1:3456/config', 'http://localhost:3456/config', 'http://192.168.1.37:3456/x', 'http://169.254.169.254/latest', 'http://[::1]:3456/', 'file:///etc/passwd'])
-      await expect(fetchImageToTmp(u), u).rejects.toThrow(/not allowed|http\(s\)/);
+      await expect(fetchImageToTmp(u), u).rejects.toThrow(/nội bộ|http/);
   });
 });

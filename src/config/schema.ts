@@ -59,6 +59,15 @@ export const configSchema = z.object({
   defaultModel: z.string().default('claude-sonnet-5-5'),
   /** GPT model used when Claude fails (quota/auth/error). Must be a Codex model. */
   fallbackModel: z.string().default('gpt-6-sol'),
+  /** Only allow API access from these countries (via Cloudflare CF-IPCountry). LAN/localhost always allowed. */
+  geoBlock: z
+    .object({
+      enabled: z.boolean().default(true),
+      allowCountries: z.array(z.string()).default(['VN']),
+      /** Public IPs allowed regardless of country (e.g. own VPS reaching us without Cloudflare). */
+      allowIps: z.array(z.string()).default([]),
+    })
+    .default({ enabled: true, allowCountries: ['VN'], allowIps: [] }),
   timeoutSeconds: z.number().int().min(30).max(3600).default(900),
   bodyLimitMb: z.number().int().min(1).max(100).default(50),
   allowedOrigins: z.array(z.string()).default(['*']),
