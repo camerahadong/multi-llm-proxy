@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { clientIp, clientUserAgent } from '../lib/client-info.js';
 import { logger } from '../lib/logger.js';
+import { stripImageMetadataB64 } from '../lib/strip-image-metadata.js';
 import { authenticate } from '../middleware/auth.js';
 import type { AppContext } from '../types/index.js';
 
@@ -114,9 +115,11 @@ export async function imagesRoute(app: FastifyInstance, ctx: AppContext): Promis
 
       const results = await Promise.all(Array.from({ length: n }, fetchOne));
       const data = results.map((r) => {
-        const base64 = (r.image ?? '').replace(/^data:[^;]+;base64,/, '');
+        // Metadata (C2PA, XMP…) is dropped; pixels are untouched.
+        const image = stripImageMetadataB64(r.image ?? '');
+        const base64 = image.replace(/^data:[^;]+;base64,/, '');
         return body.response_format === 'url'
-          ? { url: r.image, revised_prompt: r.revisedPrompt ?? body.prompt }
+          ? { url: image, revised_prompt: r.revisedPrompt ?? body.prompt }
           : { b64_json: base64, revised_prompt: r.revisedPrompt ?? body.prompt };
       });
 
@@ -189,10 +192,11 @@ export async function imagesRoute(app: FastifyInstance, ctx: AppContext): Promis
       }).then((res) => res.json())) as { image?: string; error?: string; code?: string; revisedPrompt?: string };
       if (!r.image) throw new Error(r.error ?? 'image-edit upstream returned no image');
 
-      const base64 = stripDataUri(r.image);
+      const image = stripImageMetadataB64(r.image);
+      const base64 = stripDataUri(image);
       const data = [
         body.response_format === 'url'
-          ? { url: r.image, revised_prompt: r.revisedPrompt ?? body.prompt }
+          ? { url: image, revised_prompt: r.revisedPrompt ?? body.prompt }
           : { b64_json: base64, revised_prompt: r.revisedPrompt ?? body.prompt },
       ];
 
